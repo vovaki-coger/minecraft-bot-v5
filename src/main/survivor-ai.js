@@ -373,7 +373,18 @@ ${STAGE_GOALS[SURVIVOR_STAGES[this.currentStage]] || "Продолжай игр�
     const blockType = this._resolveBlock(bot, blockName);
     if (!blockType) { this._log("Не знаю блок: " + blockName); return false; }
     const block = bot.findBlock({ matching: blockType.id, maxDistance: 64 });
-    if (!block) { this._log("Не нашёл " + blockName + " рядом"); return false; }
+    if (!block) {
+      this._log("Блок " + blockName + " не найден рядом, исследую...");
+      if (bot.entity) {
+        const pos = bot.entity.position;
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 40 + Math.random() * 40;
+        await bot.pathfinder.goto(new goals.GoalNear(
+          pos.x + Math.cos(angle) * dist, pos.y, pos.z + Math.sin(angle) * dist, 4
+        )).catch(() => {});
+      }
+      return false;
+    }
     await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 3)).catch(() => {});
     return true;
   }
@@ -396,7 +407,16 @@ ${STAGE_GOALS[SURVIVOR_STAGES[this.currentStage]] || "Продолжай игр�
         }
       }
     }
-    this._log("Не нашёл блок для сбора: " + blockName);
+    // Блок не найден рядом — исследуем случайное направление
+    this._log("Блок " + blockName + " не найден рядом, исследую...");
+    if (bot.entity) {
+      const pos = bot.entity.position;
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 30 + Math.random() * 50;
+      const tx = pos.x + Math.cos(angle) * dist;
+      const tz = pos.z + Math.sin(angle) * dist;
+      await bot.pathfinder.goto(new goals.GoalNear(tx, pos.y, tz, 4)).catch(() => {});
+    }
     return false;
   }
 

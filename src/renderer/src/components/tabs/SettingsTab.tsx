@@ -11,6 +11,10 @@ export default function SettingsTab() {
   const [saved, setSaved] = useState(false);
   const [proxyResult, setProxyResult] = useState<string | null>(null);
   const [testingProxy, setTestingProxy] = useState(false);
+  const [autoCollect, setAutoCollect] = useState(true);
+  const [blacklist, setBlacklist] = useState<string[]>([]);
+  const [blacklistInput, setBlacklistInput] = useState("");
+  const [blacklistSaved, setBlacklistSaved] = useState(false);
 
   // Lobby config state
   const [lobbyEnabled, setLobbyEnabled] = useState(bot?.config.lobbyConfig?.enabled ?? true);
@@ -22,7 +26,11 @@ export default function SettingsTab() {
 
   useEffect(() => {
     window.electronAPI.config.getGlobalPassword().then((p: string) => setPassword(p));
-    window.electronAPI.config.get().then((cfg: any) => setProxy(cfg.globalProxy || ""));
+    window.electronAPI.config.get().then((cfg: any) => {
+      setProxy(cfg.globalProxy || "");
+      setAutoCollect(cfg.autoCollect !== false);
+      setBlacklist(cfg.pickupBlacklist || []);
+    });
   }, []);
 
   useEffect(() => {
@@ -67,6 +75,24 @@ export default function SettingsTab() {
     };
     await window.electronAPI.bot.updateConfig(bot.id, { lobbyConfig });
     setSaved(true); setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function handleSaveBlacklist() {
+    await window.electronAPI.config.set("pickupBlacklist", blacklist);
+    await window.electronAPI.config.set("autoCollect", autoCollect);
+    setBlacklistSaved(true);
+    setTimeout(() => setBlacklistSaved(false), 2000);
+  }
+
+  function addBlacklistItem() {
+    const item = blacklistInput.trim().toLowerCase().replace(/\s+/g, "_");
+    if (!item || blacklist.includes(item)) { setBlacklistInput(""); return; }
+    setBlacklist(prev => [...prev, item]);
+    setBlacklistInput("");
+  }
+
+  function removeBlacklistItem(item: string) {
+    setBlacklist(prev => prev.filter(x => x !== item));
   }
 
   async function handleTriggerLobby() {
@@ -195,6 +221,55 @@ export default function SettingsTab() {
               </p>
             </>
           )}
+        </div>
+
+        {/* Auto-collect + Blacklist */}
+        <div className="panel p-3">
+          <h3 className="text-xs font-mono mb-3" style={{ color: "#7ecc49" }}>🎒 Авто-подбор предметов</h3>
+          <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer"
+            style={{ color: autoCollect ? "#7ecc49" : "#888" }}>
+            <input type="checkbox" checked={autoCollect}
+              onChange={e => setAutoCollect(e.target.checked)}
+              style={{ accentColor: "#7ecc49" }} />
+            Бот автоматически подбирает предметы рядом (для всех ботов)
+          </label>
+
+          <p className="text-xs mb-2" style={{ color: "#666" }}>
+            Предметы которые бот НЕ будет подбирать (для всех ботов):
+          </p>
+
+          <div className="flex gap-1 mb-2">
+            <input
+              className="input text-xs flex-1"
+              value={blacklistInput}
+              onChange={e => setBlacklistInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addBlacklistItem()}
+              placeholder="cobblestone, gravel, dirt..."
+              style={{ fontFamily: "monospace" }}
+            />
+            <button className="btn text-xs" onClick={addBlacklistItem} style={{ whiteSpace: "nowrap" }}>
+              + Добавить
+            </button>
+          </div>
+
+          {blacklist.length > 0 ? (
+            <div className="flex flex-wrap gap-1 mb-3">
+              {blacklist.map(item => (
+                <div key={item} className="flex items-center gap-1 px-2 py-0.5 rounded text-xs"
+                  style={{ background: "#2a1a1a", border: "1px solid #5a3a3a", color: "#e67e22", fontFamily: "monospace" }}>
+                  <span>{item}</span>
+                  <button onClick={() => removeBlacklistItem(item)}
+                    style={{ color: "#e74c3c", background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 10, marginLeft: 2 }}>✕</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs mb-3" style={{ color: "#444" }}>Список пустой — подбирает всё</p>
+          )}
+
+          <button className="btn btn-primary text-xs w-full" onClick={handleSaveBlacklist}>
+            {blacklistSaved ? "✅ Сохранено!" : "💾 Сохранить настройки подбора"}
+          </button>
         </div>
 
         {/* Ollama */}

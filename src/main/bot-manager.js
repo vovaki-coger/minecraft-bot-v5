@@ -258,6 +258,45 @@ class BotManager {
         log.info(`[Bot ${botId}] forcedMove — сервер скорректировал позицию (античит?)`);
       });
 
+      // ── Авто-подбор предметов с земли ─────────────────────────────────
+      const autoCollectTimer = setInterval(() => {
+        if (!bot?.entity) return;
+        if (this.configManager.get('autoCollect', true) === false) return;
+
+        const blacklist = new Set(this.configManager.get('pickupBlacklist', []));
+        let closest = null;
+        let closestDist = 7;
+
+        for (const entity of Object.values(bot.entities)) {
+          if (entity.name !== 'item' || !entity.position) continue;
+          // Получаем имя предмета из метаданных (Mineflayer 4.x)
+          let itemName = '';
+          try {
+            const meta = entity.metadata;
+            if (Array.isArray(meta)) {
+              for (const m of meta) {
+                if (m && typeof m === 'object' && m.value?.present !== undefined) {
+                  itemName = m.value?.blockId || m.value?.itemId || '';
+                  break;
+                }
+              }
+            }
+          } catch {}
+          if (itemName && blacklist.has(itemName)) continue;
+
+          const dist = bot.entity.position.distanceTo(entity.position);
+          if (dist < closestDist) { closest = entity; closestDist = dist; }
+        }
+
+        if (closest && closestDist > 0.5) {
+          bot.pathfinder?.goto(
+            new goals.GoalNear(closest.position.x, closest.position.y, closest.position.z, 0.5)
+          ).catch(() => {});
+        }
+      }, 2000);
+
+      bot.once('end', () => clearInterval(autoCollectTimer));
+
       this.emit("bot:statusChanged", { botId, status: "online" });
       this._addChat(instance, "system", "✅ Бот подключился к серверу. ИИ-мозг активирован.");
 

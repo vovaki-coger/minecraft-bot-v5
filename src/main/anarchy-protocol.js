@@ -44,6 +44,7 @@ class AnarchyProtocol {
     this.isRunning = false;
     this._task = "";
     this._homeCommand = "/home";
+    this._rtpCommand = "";
     this._cycleMinutes = 5;
     this._maxInventorySlots = 28;
     this._loop = null;
@@ -56,10 +57,11 @@ class AnarchyProtocol {
 
   // ── Запуск ──────────────────────────────────────────────────────────
 
-  async start({ task, homeCommand = "/home", cycleMinutes = 5, maxInventory = 28 }) {
+  async start({ task, homeCommand = "/home", rtpCommand = "", cycleMinutes = 5, maxInventory = 28 }) {
     if (this.isRunning) await this.stop();
     this._task = task;
     this._homeCommand = homeCommand;
+    this._rtpCommand = rtpCommand;
     this._cycleMinutes = cycleMinutes;
     this._maxInventorySlots = maxInventory;
     this.isRunning = true;
@@ -87,6 +89,7 @@ class AnarchyProtocol {
       isRunning: this.isRunning,
       task: this._task,
       homeCommand: this._homeCommand,
+      rtpCommand: this._rtpCommand,
       phase: this._phase,
       cycleCount: this._cycleCount,
       log: this._log.slice(-50),
@@ -124,11 +127,15 @@ class AnarchyProtocol {
     const startTime = Date.now();
     const maxMs = this._cycleMinutes * 60 * 1000;
 
-    // Отправляем задачу в AIBrain
-    if (this.instance.aiBrain) {
+    // Отправляем задачу боту — используем taskManager если задача распознана
+    const tm = this.instance.taskManager;
+    const parsedTask = this._parseAnarchyTask(this._task);
+    if (parsedTask && tm) {
+      this._addLog(`📋 Задача распознана: ${parsedTask.name}`);
+      tm.runTask(parsedTask.name, parsedTask.args).catch(() => {});
+    } else if (this.instance.aiBrain) {
       this.instance.aiBrain.respondToPlayer("AnarchyProtocol", this._task).catch(() => {});
     } else {
-      // Fallback: отправляем как Andy-4 команду напрямую
       bot.chat(this._task.slice(0, 100));
     }
 
@@ -203,6 +210,14 @@ class AnarchyProtocol {
 
     this._addLog(`✅ База готова. Возвращаюсь к задаче.`);
     this._setPhase("resuming");
+
+    // RTP — телепортируемся в рандомное место перед началом задачи
+    if (this._rtpCommand && bot?.entity) {
+      this._addLog(`🌐 RTP: ${this._rtpCommand}`);
+      bot.chat(this._rtpCommand);
+      await sleep(6000); // ждём телепорт и загрузку чанков
+    }
+
     await sleep(1000);
   }
 
@@ -312,6 +327,27 @@ class AnarchyProtocol {
     }
   }
 
+  // ── Парсинг задачи в команду taskManager ────────────────────────────
+
+  _parseAnarchyTask(task) {
+    const t = task.toLowerCase();
+    if (/руби|рубить|дерев|wood|log/.test(t)) {
+      const m = t.match(/(\d+)/);
+      return { name: "gather_wood", args: { count: m ? parseInt(m[1]) : 32 } };
+    }
+    if (/камень|cobble|stone/.test(t)) {
+      const m = t.match(/(\d+)/);
+      return { name: "gather_stone", args: { count: m ? parseInt(m[1]) : 64 } };
+    }
+    if (/еда|охот|корова|свинья|курица|food|hunt/.test(t)) {
+      return { name: "gather_food", args: {} };
+    }
+    if (/исследу|explore|гуля/.test(t)) {
+      return { name: "explore", args: {} };
+    }
+    return null; // AI обработает
+  }
+
   // ── Утилиты ─────────────────────────────────────────────────────────
 
   _setPhase(phase) {
@@ -327,5 +363,10 @@ class AnarchyProtocol {
     this.emit("bot:anarchyLog", { botId: this.instance.id, msg, time: entry.time });
   }
 }
+
+}
+
+// Helper вне класса — нет, добавляем как метод класса
+// (Метод добавлен как _parseAnarchyTask внутри класса — см. ниже)
 
 module.exports = { AnarchyProtocol };

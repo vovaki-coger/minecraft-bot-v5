@@ -110,10 +110,31 @@ class TaskManager {
       .filter(Boolean);
 
     let collected = 0;
-    while (this._running && collected < count) {
-      const block = this.bot.findBlock({ matching: logIds, maxDistance: 64 });
-      if (!block) { this._chat("Нет деревьев рядом!"); break; }
+    let searchRadius = 64;
+    let exploreAttempts = 0;
 
+    while (this._running && collected < count) {
+      const block = this.bot.findBlock({ matching: logIds, maxDistance: searchRadius });
+
+      if (!block) {
+        if (exploreAttempts >= 8) {
+          this._chat("Не нашёл деревьев даже после исследования. Собрал: " + collected);
+          break;
+        }
+        // Исследуем дальше — ищем деревья
+        this._log("Деревьев нет в " + searchRadius + "м, исследую дальше...");
+        const pos = this.bot.entity.position;
+        const angle = (exploreAttempts / 8) * Math.PI * 2; // равномерно по кругу
+        const dist = 40 + exploreAttempts * 20;
+        const tx = pos.x + Math.cos(angle) * dist;
+        const tz = pos.z + Math.sin(angle) * dist;
+        await this.bot.pathfinder.goto(new goals.GoalNear(tx, pos.y, tz, 4)).catch(() => {});
+        searchRadius = Math.min(searchRadius + 32, 192);
+        exploreAttempts++;
+        continue;
+      }
+
+      exploreAttempts = 0; // нашли — сбрасываем счётчик попыток
       await this.bot.pathfinder.goto(
         new goals.GoalBlock(block.position.x, block.position.y, block.position.z)
       ).catch(() => {});

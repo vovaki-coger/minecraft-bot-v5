@@ -3,9 +3,16 @@ import { BotState, InventoryItem } from "../store/appStore";
 
 interface Props { bot: BotState; }
 
-function getItemIconUrl(name: string): string {
+function getItemIconSources(name: string): string[] {
   const formatted = name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("_");
-  return `https://minecraft.wiki/images/Invicon_${formatted}.png`;
+  return [
+    // Настоящие 16×16 текстуры из Minecraft 1.20.4 (item)
+    `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.20.4/assets/minecraft/textures/item/${name}.png`,
+    // Некоторые предметы — это блоки (сундук, печь, верстак…)
+    `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.20.4/assets/minecraft/textures/block/${name}.png`,
+    // Резерв: Minecraft Wiki
+    `https://minecraft.wiki/images/Invicon_${formatted}.png`,
+  ];
 }
 
 type Category = "all" | "weapons" | "tools" | "armor" | "food" | "blocks" | "misc";
@@ -73,8 +80,10 @@ function getDurabilityColor(pct: number): string {
 }
 
 function ItemSlot({ item, active, highlight }: { item: InventoryItem | null; active: boolean; highlight: boolean }) {
-  const [imgFailed, setImgFailed] = useState(false);
+  const [srcIdx, setSrcIdx] = useState(0);
   const [hovered, setHovered] = useState(false);
+  const sources = item ? getItemIconSources(item.name) : [];
+  const imgFailed = srcIdx >= sources.length;
   const cat = item ? getCategory(item.name) : "misc";
   const catColor = item ? CATEGORY_COLOR[cat] : "#555";
   const hasDurability = item && item.durabilityUsed !== undefined && item.maxDurability !== undefined && item.maxDurability > 0;
@@ -108,11 +117,11 @@ function ItemSlot({ item, active, highlight }: { item: InventoryItem | null; act
           <>
             {!imgFailed ? (
               <img
-                src={getItemIconUrl(item.name)}
+                src={sources[srcIdx]}
                 alt={item.name}
                 width={28} height={28}
                 style={{ imageRendering: "pixelated", display: "block" }}
-                onError={() => setImgFailed(true)}
+                onError={() => setSrcIdx(p => p + 1)}
               />
             ) : (
               <span style={{ fontSize: 18, lineHeight: 1 }}>{getItemEmoji(item.name)}</span>
