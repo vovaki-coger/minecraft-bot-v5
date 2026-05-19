@@ -404,8 +404,21 @@ ${STAGE_GOALS[SURVIVOR_STAGES[this.currentStage]] || "Продолжай игр�
     if (!entityName) return false;
     const entity = this._findEntity(bot, entityName, 24);
     if (!entity) { this._log("Не вижу " + entityName + " рядом"); return false; }
-    await bot.pathfinder.goto(new goals.GoalFollow(entity, 2)).catch(() => {});
-    if (entity.isValid) bot.attack(entity);
+    // Подходим к цели с таймаутом 4 сек — на серверах с лагом goto может висеть вечно
+    const gotoPromise = bot.pathfinder.goto(new goals.GoalFollow(entity, 2));
+    const timeoutPromise = new Promise(r => setTimeout(r, 4000));
+    await Promise.race([gotoPromise, timeoutPromise]).catch(() => {});
+    if (entity.isValid) {
+      // Смотрим на цель перед ударом — без этого сервер и античит отклоняют удары
+      const headPos = entity.position.offset(0, (entity.height || 1.8) * 0.85, 0);
+      await bot.lookAt(headPos, true).catch(() => {});
+      // Используем pvp-плагин если доступен (правильный кулдаун + aim)
+      if (bot.pvp) {
+        bot.pvp.attack(entity);
+      } else {
+        bot.attack(entity);
+      }
+    }
     return true;
   }
 

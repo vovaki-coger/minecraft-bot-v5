@@ -4,6 +4,7 @@
 
 const mineflayer = require("mineflayer");
 const { pathfinder, Movements, goals } = require("mineflayer-pathfinder");
+const { plugin: pvp } = require("mineflayer-pvp");
 const { SocksProxyAgent } = require("socks-proxy-agent");
 const { HttpProxyAgent } = require("http-proxy-agent");
 const { HttpsProxyAgent } = require("https-proxy-agent");
@@ -194,6 +195,7 @@ class BotManager {
     const botId = instance.id;
 
     bot.loadPlugin(pathfinder);
+    bot.loadPlugin(pvp);
 
     bot.once("spawn", () => {
       instance.status = "online";
@@ -244,7 +246,17 @@ class BotManager {
       movements.allowSprinting = true;
       movements.canDig = true;
       movements.allow1by1towers = true;
+      movements.maxDropDown = 4;
+      movements.allowParkour = false;
       bot.pathfinder.setMovements(movements);
+
+      // Обрабатываем принудительное перемещение от сервера (античит, телепорт).
+      // Сбрасываем pathfinder чтобы пересчитал маршрут с новой позиции.
+      bot.on('forcedMove', () => {
+        try { bot.pathfinder.setGoal(null); } catch {}
+        try { bot.clearControlStates(); } catch {}
+        log.info(`[Bot ${botId}] forcedMove — сервер скорректировал позицию (античит?)`);
+      });
 
       this.emit("bot:statusChanged", { botId, status: "online" });
       this._addChat(instance, "system", "✅ Бот подключился к серверу. ИИ-мозг активирован.");
