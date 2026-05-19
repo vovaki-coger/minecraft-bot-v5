@@ -1,0 +1,134 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build renderer
+        run: pnpm run build:renderer
+
+      - name: Build Electron (Windows)
+        run: pnpm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist-electron/*.exe
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev libnss3-dev \
+            libgdk-pixbuf2.0-dev libxss1 libgconf-2-4
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build renderer
+        run: pnpm run build:renderer
+
+      - name: Build Electron (Linux)
+        run: pnpm run dist:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: dist-electron/*.AppImage
+
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: ./release-files
+
+      - name: Download Linux build
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: ./release-files
+
+      - name: List release files
+        run: ls -la ./release-files
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Призмарин Бот ${{ github.ref_name }}"
+          body: |
+            ## Призмарин Бот ${{ github.ref_name }}
+
+            ### 🐛 Что исправлено
+            - **Ошибка React #31** при открытии "Запись анки" — объекты NBT теперь правильно конвертируются в строки
+            - **ПКМ на компас** — исправлена ошибка при правом клике на компас в инвентаре
+            - Улучшен парсинг заголовков окон Minecraft (поддержка JSON-чат компонентов)
+            - Улучшен парсинг NBT данных предметов (поддержка ChatMessage объектов)
+
+            ### 📥 Установка
+            - **Windows**: скачай `.exe` и запусти установщик
+            - **Linux**: скачай `.AppImage`, дай права на выполнение (`chmod +x имя_файла.AppImage`) и запусти
+
+            ### 📝 Полный список изменений
+            Смотри [коммиты](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }})
+          draft: false
+          prerelease: false
+          files: ./release-files/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
