@@ -63,9 +63,15 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev librsvg2-dev libnss3-dev \
-            libgdk-pixbuf2.0-dev libxss1 libgconf-2-4
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libnss3-dev \
+            libgdk-pixbuf2.0-dev \
+            libxss1 \
+            libglib2.0-dev
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
@@ -119,14 +125,11 @@ jobs:
             - **Ошибка React #31** при открытии "Запись анки" — объекты NBT теперь правильно конвертируются в строки
             - **ПКМ на компас** — исправлена ошибка при правом клике на компас в инвентаре
             - Улучшен парсинг заголовков окон Minecraft (поддержка JSON-чат компонентов)
-            - Улучшен парсинг NBT данных предметов (поддержка ChatMessage объектов)
+            - Улучшена конвертация NBT данных предметов
 
             ### 📥 Установка
             - **Windows**: скачай `.exe` и запусти установщик
-            - **Linux**: скачай `.AppImage`, дай права на выполнение (`chmod +x имя_файла.AppImage`) и запусти
-
-            ### 📝 Полный список изменений
-            Смотри [коммиты](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }})
+            - **Linux**: скачай `.AppImage`, дай права (`chmod +x файл.AppImage`) и запусти
           draft: false
           prerelease: false
           files: ./release-files/*
