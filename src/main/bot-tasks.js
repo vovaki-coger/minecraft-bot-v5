@@ -274,10 +274,27 @@ class TaskManager {
       return;
     }
     this._chat("Атакую " + (entity.displayName || entity.name) + "!");
-    while (this._running && entity.isValid && entity.health > 0) {
-      await this.bot.pathfinder.goto(new goals.GoalFollow(entity, 2)).catch(() => {});
-      this.bot.attack(entity);
-      await this._sleep(500);
+    // Используем pvp-плагин если доступен — он сам следит за кулдауном и взглядом на цель
+    if (this.bot.pvp) {
+      this.bot.pvp.attack(entity);
+      while (this._running && entity.isValid && entity.health > 0) {
+        await this._sleep(500);
+      }
+      try { this.bot.pvp.stop(); } catch {}
+    } else {
+      while (this._running && entity.isValid && entity.health > 0) {
+        // Подходим к цели с таймаутом 3 сек — на серверах goto может зависать
+        const gotoP = this.bot.pathfinder.goto(new goals.GoalFollow(entity, 2));
+        await Promise.race([gotoP, new Promise(r => setTimeout(r, 3000))]).catch(() => {});
+        if (entity.isValid) {
+          // Смотрим на цель перед ударом — без этого античит отклоняет удары
+          const headPos = entity.position.offset(0, (entity.height || 1.8) * 0.85, 0);
+          await this.bot.lookAt(headPos, true).catch(() => {});
+          this.bot.attack(entity);
+        }
+        // Рандомная задержка 420-680мс вместо ровных 500 — обходит паттерн-детект античита
+        await this._sleep(420 + Math.floor(Math.random() * 260));
+      }
     }
     this._chat((entity.displayName || entity.name) + " побеждён!");
   }
