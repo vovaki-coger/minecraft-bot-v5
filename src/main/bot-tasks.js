@@ -61,6 +61,8 @@ class TaskManager {
         case "attack":       await this._taskAttackMob(args.target); break;
         case "walk_to":      await this._taskWalkTo(args.x, args.y, args.z); break;
         case "explore":      await this._taskExplore(); break;
+        case "farm_trees":   await this._taskFarmTrees(args.radius || 20, args.crop || "oak"); break;
+        case "pvp_attack":   await this._taskPvpAttack(args.target); break;
         case "inventory":    this._reportInventory(); break;
         case "status":       this._reportStatus(); break;
         default:
@@ -430,10 +432,26 @@ function parseCommand(message, botName) {
     return { task: "gather_food" };
   }
 
-  // --- ФЕРМА ---
-  if (/построй ферм|сделай ферм|посади (семена|пшениц|ферм|огород)|farm/.test(clean)) {
+  // --- ФЕРМА ПШЕНИЦЫ ---
+  if (/построй ферм|сделай ферм|посади (семена|пшениц|огород)/.test(clean)) {
     const m = clean.match(/(\d+)/);
     return { task: "build_farm", size: m ? Math.min(parseInt(m[1]), 8) : 4 };
+  }
+
+  // --- ФЕРМА ДЕРЕВЬЕВ ---
+  if (/ферм.{0,8}дерев|дерево.{0,8}ферм|руби.{0,8}зон|farm.{0,8}tree|tree.{0,8}farm|сажай дерев|вырашив/.test(clean)) {
+    const radiusM = clean.match(/(\d+)/);
+    const cropM = clean.match(/(дуб|берёза|берез|ель|елка|акация|тёмный дуб|oak|birch|spruce|jungle|acacia|dark_oak)/);
+    const cropMap = {
+      'дуб':'oak','oak':'oak','берёза':'birch','берез':'birch','birch':'birch',
+      'ель':'spruce','елка':'spruce','spruce':'spruce','jungle':'jungle',
+      'акация':'acacia','acacia':'acacia','тёмный дуб':'dark_oak','dark_oak':'dark_oak',
+    };
+    return {
+      task: "farm_trees",
+      radius: radiusM ? Math.min(parseInt(radiusM[1]), 60) : 20,
+      crop: cropM ? (cropMap[cropM[1].toLowerCase()] || 'oak') : 'oak',
+    };
   }
 
   // --- ДОМ ---

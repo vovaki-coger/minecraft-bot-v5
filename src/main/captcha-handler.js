@@ -20,6 +20,7 @@ class CaptchaHandler {
   async handleChatCaptcha(message) {
     if (this.pendingCaptcha) return;
 
+    // Разнообразные форматы: "Ответ = 5+3?", "Реши: 12-7", "Сколько будет 4*6"
     const mathMatch = message.match(MATH_PATTERN);
     if (mathMatch) {
       this.pendingCaptcha = true;
@@ -55,7 +56,12 @@ class CaptchaHandler {
   }
 
   _isComplexCaptcha(message) {
-    const keywords = ["капча", "captcha", "докажи", "verify", "verification", "какой цвет", "what color", "сколько"];
+    const keywords = [
+      "капча", "captcha", "докажи", "verify", "verification",
+      "какой цвет", "what color", "сколько", "антибот", "anti-bot",
+      "нажми", "click", "введи код", "enter code", "security code",
+      "подтверди", "confirm", "human check", "are you human",
+    ];
     return keywords.some((k) => message.toLowerCase().includes(k));
   }
 

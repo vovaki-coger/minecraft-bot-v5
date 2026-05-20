@@ -297,6 +297,40 @@ class BotManager {
 
       bot.once('end', () => clearInterval(autoCollectTimer));
 
+      // ── Самооборона: атаковать игрока который бьёт нас ─────────────────
+      let prevHealth = bot.health || 20;
+      bot.on('health', () => {
+        if (!bot.entity) return;
+        const newHealth = bot.health || 20;
+        if (newHealth < prevHealth && instance.config.selfDefense !== false) {
+          // Ищем ближайшего игрока который мог ударить (в радиусе 6 блоков)
+          let attacker = null;
+          let minDist = 7;
+          for (const e of Object.values(bot.entities)) {
+            if (!e.position || e === bot.entity) continue;
+            const isPlayer = e.type === 'player' || (e.username && e.username !== bot.username);
+            if (!isPlayer) continue;
+            const dist = bot.entity.position.distanceTo(e.position);
+            if (dist < minDist) { minDist = dist; attacker = e; }
+          }
+          if (attacker && attacker.isValid) {
+            log.info(`[Bot ${botId}] Самооборона! Атакую ${attacker.username || attacker.name}`);
+            try { bot.lookAt(attacker.position.offset(0, (attacker.height || 1.8) * 0.85, 0)); } catch {}
+            if (bot.pvp) {
+              bot.pvp.attack(attacker);
+            } else {
+              setTimeout(() => bot.attack(attacker), 100);
+            }
+          }
+        }
+        prevHealth = newHealth;
+      });
+
+      // ── Защита от кика: отвечаем на kick_disconnect ────────────────────
+      bot._client?.on('kick_disconnect', (packet) => {
+        log.warn(`[Bot ${botId}] kick_disconnect:`, packet.reason);
+      });
+
       this.emit("bot:statusChanged", { botId, status: "online" });
       this._addChat(instance, "system", "✅ Бот подключился к серверу. ИИ-мозг активирован.");
 
@@ -492,12 +526,17 @@ class BotManager {
   // ── Первоначальная авто-аутентификация при спавне ─────────────────────────
   async _tryInitialAuth(instance) {
     const pass = this.configManager.getGlobalPassword();
-    if (!pass || instance._authAttempted) return;
-    // Не пытаемся авторизоваться если это похоже на обычный сервер без авторизации
-    // Просто ждём сообщения — setTimeout в _attachEvents это уже сделает
-    // Этот метод — дополнительная попытка для серверов которые не отправляют чат-приглашение
-    // Не шлём сразу, просто логируем готовность
-    log.info("[BotManager] Auth ready, waiting for server prompt...");
+    if (!pass) return;
+    // Сначала ждём 3 секунды — сервер сам должен попросить
+    // Если через 5 сек не попросил — пробуем /login сами (для серверов без приглашения)
+    setTimeout(() => {
+      if (instance._authAttempted || !instance.bot) return;
+      if (!instance.config.autoLogin) return;
+      log.info("[BotManager] No auth prompt received, trying /login proactively");
+      instance._authAttempted = true;
+      instance.bot.chat("/login " + pass);
+      this._addChat(instance, "system", "🔑 Авто-логин (без приглашения)");
+    }, 5000);
   }
 
   // ── Обработка авто-логина из chat-события ────────────────────────────────
