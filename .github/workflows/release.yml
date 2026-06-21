@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -43,6 +46,14 @@ jobs:
           name: windows-build
           path: dist-electron/*.exe
 
+      - name: Upload to Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-electron/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-linux:
     name: Build Linux
     runs-on: ubuntu-latest
@@ -53,7 +64,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -90,48 +101,10 @@ jobs:
           name: linux-build
           path: dist-electron/*.AppImage
 
-  release:
-    name: Create GitHub Release
-    needs: [build-windows, build-linux]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Download Windows build
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-build
-          path: ./release-files
-
-      - name: Download Linux build
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-build
-          path: ./release-files
-
-      - name: List release files
-        run: ls -la ./release-files
-
-      - name: Create Release
+      - name: Upload to Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "Призмарин Бот ${{ github.ref_name }}"
-          body: |
-            ## Призмарин Бот ${{ github.ref_name }}
-
-            ### 🐛 Что исправлено
-            - **Ошибка React #31** при открытии "Запись анки" — объекты NBT теперь правильно конвертируются в строки
-            - **ПКМ на компас** — исправлена ошибка при правом клике на компас в инвентаре
-            - Улучшен парсинг заголовков окон Minecraft (поддержка JSON-чат компонентов)
-            - Улучшена конвертация NBT данных предметов
-
-            ### 📥 Установка
-            - **Windows**: скачай `.exe` и запусти установщик
-            - **Linux**: скачай `.AppImage`, дай права (`chmod +x файл.AppImage`) и запусти
-          draft: false
-          prerelease: false
-          files: ./release-files/*
+          files: dist-electron/*.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

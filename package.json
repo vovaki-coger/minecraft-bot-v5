@@ -1,7 +1,7 @@
 {
-  "name": "@workspace/minecraft-bot-4",
-  "version": "4.1.0",
-  "description": "Призмарин Бот v4.1.0 — исправлена ошибка React #31, ПКМ компас, запись анки",
+  "name": "@workspace/minecraft-bot-v5",
+  "version": "5.1.1",
+  "description": "PrizmarinBot v5 — AntiDetect, LobbyHandler, AI-мозг",
   "main": "src/main/index.js",
   "private": true,
   "scripts": {
@@ -97,7 +97,7 @@
         }
       ],
       "icon": "assets/icon.ico",
-      "artifactName": "PrizmarinBot-Setup-${version}.${ext}"
+      "artifactName": "PrizmarinBot-v${version}-Setup.${ext}"
     },
     "linux": {
       "target": [
@@ -110,7 +110,7 @@
       ],
       "icon": "assets/icon.png",
       "category": "Game",
-      "artifactName": "PrizmarinBot-${version}.${ext}"
+      "artifactName": "PrizmarinBot-v${version}.${ext}"
     },
     "mac": {
       "target": [
@@ -124,7 +124,7 @@
       ],
       "icon": "assets/icon.icns",
       "category": "public.app-category.games",
-      "artifactName": "PrizmarinBot-${version}-${arch}.${ext}"
+      "artifactName": "PrizmarinBot-v${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -132,6 +132,13 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "artifactName": "PrizmarinBot-${version}-${arch}.${ext}"
+    "artifactName": "PrizmarinBot-${version}-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "vovaki-coger",
+        "repo": "minecraft-bot-v5"
+      }
+    ]
   }
 }
