@@ -283,8 +283,6 @@ class BotManager {
 
       // ── AntiDetect v2: login packet masking + ground flag + velocity + lookAt ──
       AntiDetect.patchLoginPackets(bot);
-      AntiDetect.patchGroundFlag(bot);
-      AntiDetect.patchVelocityClamp(bot);
       AntiDetect.patchLookAt(bot);
 
       // ── forcedMove: сервер скорректировал позицию (античит/телепорт) ─
@@ -1282,12 +1280,13 @@ class BotManager {
       } catch {}
     };
 
-    // 3. Sprint-reset: выключаем спринт на 80-130ms после удара (сбрасывает sprint-hit флаг)
+    // 3. Sprint-reset: W-tap для сброса скорости (спринт не включаем — вызывает кик)
     const sprintReset = async (bot) => {
       try {
         bot.setControlState('sprint', false);
+        bot.setControlState('forward', false);
         await new Promise(r => setTimeout(r, 80 + Math.floor(Math.random()*50)));
-        bot.setControlState('sprint', true);
+        bot.setControlState('forward', true);
       } catch {}
     };
 
@@ -1332,14 +1331,14 @@ class BotManager {
             bot.setControlState(strafeDir, false);
             try {
               const { goals } = require('mineflayer-pathfinder');
-              bot.pathfinder?.goto(new goals.GoalFollow(target, 2)).catch(() => {});
+              bot.pathfinder?.goto(new goals.GoalNear(target.position.x, target.position.y, target.position.z, 2)).catch(() => {});
             } catch {}
             instance._pvpLoopTimer = setTimeout(loop, 500);
             return;
           }
 
-          // Включаем спринт и движение вперёд
-          bot.setControlState('sprint', true);
+          // Движение вперёд БЕЗ спринта — спринт вызывает «Invalid move player packet»
+          bot.setControlState('sprint', false);
           bot.setControlState('forward', true);
 
           // Плавный поворот к голове цели (нет мгновенного snap)
