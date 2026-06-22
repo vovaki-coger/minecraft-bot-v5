@@ -37,7 +37,8 @@
     "crypto-js": "^4.2.0",
     "axios": "^1.7.9",
     "uuid": "^11.0.5",
-    "brain.js": "^1.6.1"
+    "brain.js": "^1.6.1",
+    "vec3": "~0.1.7"
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",
