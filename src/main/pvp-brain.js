@@ -1,26 +1,15 @@
 /**
- * PvpBrain v3 — нейросеть PVP, 500 обучающих сценариев
+ * PvpBrain v4 — нейросеть PVP, 10000+ обучающих сценариев (генерация)
  *
  * Архитектура: brain.js NeuralNetwork 12→24→18→12→7
  * Входной вектор (12 признаков):
- *   0  — дистанция (норм 0-1, max=10)
- *   1  — HP бота (0-1)
- *   2  — HP цели (0-1)
- *   3  — HP разница бот-цель (0..1, 0.5 = равны)
- *   4  — голод бота (0-1)
- *   5  — есть ли меч/топор в руке (0/1)
- *   6  — есть ли еда в инвентаре (0/1)
- *   7  — есть ли хил-зелье (0/1)
- *   8  — есть ли бафф-зелье (0/1)
- *   9  — кулдаун атаки (0-1, 1=готов)
- *   10 — союзники рядом (0-1, max=5)
- *   11 — враги рядом (0-1, max=5)
- *
- * Выходной вектор (7 действий):
- *   0 — attack       1 — retreat
- *   2 — eat          3 — throwHeal
- *   4 — throwPotion  5 — throwPerk
- *   6 — strafe
+ *   0  — dist (0-1, max=10)       1  — botHp (0-1)
+ *   2  — tgtHp (0-1)              3  — hpDiff (0-1, 0.5=равны)
+ *   4  — hunger (0-1)             5  — hasSword (0/1)
+ *   6  — hasFood (0/1)            7  — hasHeal (0/1)
+ *   8  — hasBuff (0/1)            9  — attackCd (0-1)
+ *   10 — allies (0-1, max=5)      11 — enemies (0-1, max=5)
+ * Выходной вектор (7 действий): attack retreat eat throwHeal throwPotion throwPerk strafe
  */
 
 const log = require("electron-log");
@@ -31,586 +20,493 @@ catch { log.warn("[PvpBrain] brain.js не установлен — эврист
 
 const path = require("path");
 const fs   = require("fs");
-
 const WEIGHTS_PATH = path.join(__dirname, "../../pvp-weights.json");
 
 const SWORD_NAMES = ["wooden_sword","stone_sword","iron_sword","golden_sword","diamond_sword","netherite_sword","mace"];
 const AXE_NAMES   = ["wooden_axe","stone_axe","iron_axe","golden_axe","diamond_axe","netherite_axe"];
-const HEAL_NAMES  = ["potion_of_healing","splash_potion_of_healing","potion_of_regeneration","splash_potion_of_regeneration","potion_of_instant_health"];
-const BUFF_NAMES  = ["potion_of_strength","splash_potion_of_strength","potion_of_speed","splash_potion_of_speed"];
-const FOOD_NAMES  = ["apple","golden_apple","enchanted_golden_apple","bread","cooked_beef","cooked_porkchop","cooked_chicken","cooked_mutton","cooked_rabbit","carrot","baked_potato","cookie","melon_slice","pumpkin_pie","mushroom_stew","cooked_salmon","cooked_cod"];
+const HEAL_NAMES  = ["healing","instant_health","regeneration"];
+const BUFF_NAMES  = ["strength","speed","resistance","absorption"];
+const FOOD_NAMES  = ["apple","golden_apple","enchanted_golden_apple","bread","cooked_beef","cooked_porkchop","cooked_chicken","cooked_mutton","cooked_rabbit","carrot","baked_potato","golden_carrot","mushroom_stew","cooked_salmon","cooked_cod"];
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 function getBotFeatures(bot, target, teammates = []) {
   if (!bot?.entity || !target?.position) return null;
-
   const dist     = bot.entity.position.distanceTo(target.position);
   const heldItem = bot.heldItem;
-
-  const items   = bot.inventory.items();
-  const hasSword = heldItem
-    ? (SWORD_NAMES.some(n => heldItem.name.includes(n)) || AXE_NAMES.some(n => heldItem.name.includes(n)))
-    : false;
+  const items    = bot.inventory.items();
+  const hasSword = heldItem ? (SWORD_NAMES.some(n => heldItem.name.includes(n)) || AXE_NAMES.some(n => heldItem.name.includes(n))) : false;
   const hasFood  = items.some(i => FOOD_NAMES.includes(i.name));
-  const hasHeal  = items.some(i => HEAL_NAMES.some(n => i.name.includes(n.replace("potion_of_","").replace("splash_",""))));
-  const hasBuff  = items.some(i => BUFF_NAMES.some(n => i.name.includes(n.replace("potion_of_","").replace("splash_",""))));
-
-  const attackCd = heldItem
-    ? clamp((Date.now() - (bot._lastAttackTime || 0)) / 620, 0, 1)
-    : 1;
-
-  const allies = Object.values(bot.entities || {}).filter(e => {
-    if (!e.position || e === bot.entity) return false;
-    return teammates.includes(e.username);
-  }).length;
-
-  const enemies = Object.values(bot.entities || {}).filter(e => {
-    if (!e.position || e === bot.entity) return false;
-    if (teammates.includes(e.username)) return false;
-    return (e.type === "player" || e.type === "mob") &&
-      e.position.distanceTo(bot.entity.position) < 10;
-  }).length;
-
+  const hasHeal  = items.some(i => HEAL_NAMES.some(k => i.name.toLowerCase().includes(k)));
+  const hasBuff  = items.some(i => BUFF_NAMES.some(k => i.name.toLowerCase().includes(k)));
+  const attackCd = heldItem ? clamp((Date.now() - (bot._lastAttackTime || 0)) / 620, 0, 1) : 1;
+  const allies   = Object.values(bot.entities || {}).filter(e => e.position && e !== bot.entity && teammates.includes(e.username)).length;
+  const enemies  = Object.values(bot.entities || {}).filter(e =>
+    e.position && e !== bot.entity && !teammates.includes(e.username) &&
+    (e.type === "player" || e.type === "mob") &&
+    e.position.distanceTo(bot.entity.position) < 10
+  ).length;
   return [
-    clamp(dist / 10, 0, 1),
-    clamp(bot.health / 20, 0, 1),
+    clamp(dist / 10, 0, 1), clamp(bot.health / 20, 0, 1),
     clamp((target.health || 20) / 20, 0, 1),
     clamp((bot.health - (target.health || 20)) / 20 + 0.5, 0, 1),
     clamp((bot.food || 20) / 20, 0, 1),
-    hasSword ? 1 : 0,
-    hasFood  ? 1 : 0,
-    hasHeal  ? 1 : 0,
-    hasBuff  ? 1 : 0,
-    attackCd,
-    clamp(allies  / 5, 0, 1),
-    clamp(enemies / 5, 0, 1),
+    hasSword ? 1 : 0, hasFood ? 1 : 0, hasHeal ? 1 : 0, hasBuff ? 1 : 0,
+    attackCd, clamp(allies / 5, 0, 1), clamp(enemies / 5, 0, 1),
   ];
 }
 
-// ─── 500 обучающих сценариев ──────────────────────────────────────────────
+// ─── Генератор обучающих данных (~10000 сценариев) ────────────────────────
 function buildSeedData() {
   const data = [];
 
-  // [dist,botHp,tgtHp,hpDiff,hunger,sword,food,heal,buff,cd,ally,enemy]
-  // output: [attack,retreat,eat,throwHeal,throwPotion,throwPerk,strafe]
-  function s(input, output) {
-    const hpDiff = clamp((input[1] - input[2]) / 2 + 0.5, 0, 1);
-    const inp = [
-      clamp(input[0],0,1), // dist
-      clamp(input[1],0,1), // botHp
-      clamp(input[2],0,1), // tgtHp
-      hpDiff,              // hpDiff
-      clamp(input[3],0,1), // hunger
-      input[4] ? 1 : 0,   // sword
-      input[5] ? 1 : 0,   // food
-      input[6] ? 1 : 0,   // heal
-      input[7] ? 1 : 0,   // buff
-      clamp(input[8],0,1), // cd
-      clamp(input[9],0,1), // ally
-      clamp(input[10],0,1),// enemy
-    ];
-    data.push({ input: inp, output: output.map(v => clamp(v, 0, 1)) });
+  // inp = [dist, botHp, tgtHp, hunger, sword, food, heal, buff, cd, ally, enemy]
+  // out = [attack, retreat, eat, throwHeal, throwPotion, throwPerk, strafe]
+  function s(inp, out) {
+    const [dist, botHp, tgtHp, hunger, sword, food, heal, buff, cd, ally, enemy] = inp;
+    const hpDiff = clamp((botHp - tgtHp) / 2 + 0.5, 0, 1);
+    data.push({
+      input:  [clamp(dist,0,1), clamp(botHp,0,1), clamp(tgtHp,0,1), hpDiff,
+               clamp(hunger,0,1), sword?1:0, food?1:0, heal?1:0, buff?1:0,
+               clamp(cd,0,1), clamp(ally,0,1), clamp(enemy,0,1)],
+      output: out.map(v => clamp(v, 0, 1))
+    });
   }
-  // shorthand: s([dist, botHp, tgtHp, hunger, sword, food, heal, buff, cd, ally, enemy], [a,r,e,h,p,k,st])
 
-  // ════════════════════════════════════════════════════════════════════
-  // 1. АТАКА — близко + кулдаун готов + меч + достаточно HP (~130)
-  // ════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 1: АТАКА (~2500 сценариев)
+  // ═══════════════════════════════════════════════════════════════════
 
-  // Классическая атака: близко, кулдаун готов
-  for (const d of [0.05, 0.1, 0.15, 0.2, 0.25, 0.3]) {
-    for (const bHp of [0.6, 0.7, 0.8, 0.9, 1.0]) {
-      for (const tHp of [0.2, 0.4, 0.6, 0.8, 1.0]) {
-        const finish = tHp <= 0.15;
-        const atk = finish ? 1.0 : (d <= 0.2 ? 0.95 : 0.85);
-        const strf = d >= 0.25 ? 0.2 : 0.05;
-        s([d, bHp, tHp, 0.85, true, false, false, false, 1.0, 0, 0.2],
-          [atk, 0, 0, 0, 0, 0, strf]);
+  // 1a. Основная атака — близко + кулдаун готов + меч
+  for (const dist of [0.02,0.05,0.08,0.10,0.12,0.15,0.18,0.20,0.22,0.25]) {
+    for (const bHp of [0.35,0.45,0.5,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,1.0]) {
+      for (const tHp of [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]) {
+        const finishing = tHp <= 0.15;
+        const atk = finishing ? 1.0 : (dist <= 0.15 ? 0.97 : dist <= 0.25 ? 0.92 : 0.85);
+        s([dist,bHp,tHp,0.9,1,0,0,0,1.0,0,0.1],[atk,0,0,0,0,0,dist>=0.2?0.1:0.03]);
+        // с буфом — чуть агрессивнее
+        s([dist,bHp,tHp,0.85,1,0,0,1,1.0,0,0.1],[atk,0,0,0,0,0.3,0]);
       }
     }
   }
 
-  // Кулдаун почти готов (0.8-0.95)
-  for (const d of [0.1, 0.15, 0.2]) {
-    for (const bHp of [0.7, 0.8, 0.9]) {
-      for (const cd of [0.8, 0.85, 0.9, 0.95]) {
-        s([d, bHp, 0.5, 0.8, true, false, false, false, cd, 0, 0.2],
-          [cd * 0.95, 0, 0, 0, 0, 0, (1 - cd) * 0.5]);
+  // 1b. Атака с союзниками — очень агрессивно
+  for (const dist of [0.05,0.10,0.15,0.20,0.25]) {
+    for (const bHp of [0.4,0.5,0.6,0.7,0.8]) {
+      for (const ally of [0.2,0.4,0.6,0.8,1.0]) {
+        s([dist,bHp,0.5,0.85,1,0,0,0,1.0,ally,0.2],[1.0,0,0,0,0,0,0]);
+        s([dist,bHp,0.7,0.85,1,0,0,0,0.9,ally,0.3],[0.9,0,0,0,0,0,0.1]);
       }
     }
   }
 
-  // Добивание — цель почти мертва
-  for (const d of [0.05, 0.1, 0.12, 0.18, 0.2]) {
-    for (const tHp of [0.05, 0.08, 0.1, 0.12]) {
-      for (const bHp of [0.3, 0.5, 0.7, 0.9]) {
-        s([d, bHp, tHp, 0.8, true, false, false, false, 1.0, 0, 0.1],
-          [1.0, 0, 0, 0, 0, 0, 0]);
+  // 1c. Добивание — враг почти мёртв
+  for (const dist of [0.02,0.05,0.08,0.10,0.12,0.15,0.18,0.20]) {
+    for (const tHp of [0.01,0.03,0.05,0.07,0.08,0.10,0.12]) {
+      for (const bHp of [0.15,0.25,0.35,0.5,0.65,0.8,0.9]) {
+        s([dist,bHp,tHp,0.8,1,0,0,0,1.0,0,0.1],[1.0,0,0,0,0,0,0]);
       }
     }
   }
 
-  // С союзниками — агрессивнее
-  for (const d of [0.1, 0.15, 0.2]) {
-    for (const ally of [0.2, 0.4, 0.6]) {
-      s([d, 0.7, 0.5, 0.85, true, false, false, false, 1.0, ally, 0.2],
-        [1.0, 0, 0, 0, 0, 0, 0.1]);
-      s([d, 0.8, 0.6, 0.85, true, false, false, false, 0.9, ally, 0.2],
-        [0.9, 0, 0, 0, 0, 0, 0.2]);
+  // 1d. Атака без меча (кулак / топор)
+  for (const dist of [0.05,0.10,0.15,0.20]) {
+    for (const bHp of [0.5,0.65,0.8,0.9]) {
+      s([dist,bHp,0.5,0.85,0,0,0,0,1.0,0,0.1],[0.6,0,0,0,0.2,0,0.4]);
+      s([dist,bHp,0.6,0.85,0,0,0,1,1.0,0,0.1],[0.3,0,0,0,0.4,0,0.5]);
     }
   }
 
-  // Атака с перком
-  for (const d of [0.1, 0.15, 0.2]) {
-    for (const bHp of [0.7, 0.8, 0.9]) {
-      s([d, bHp, 0.5, 0.85, true, false, false, true, 1.0, 0, 0.2],
-        [0.9, 0, 0, 0, 0, 0.85, 0.1]);
-      s([d, bHp, 0.4, 0.85, true, false, false, true, 0.9, 0, 0.2],
-        [0.8, 0, 0, 0, 0, 0.7, 0.2]);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════════
-  // 2. СТРЕЙФ — кулдаун не готов / далеко от цели (~90)
-  // ════════════════════════════════════════════════════════════════════
-
-  // Кулдаун не готов — ждём и стрейфим
-  for (const d of [0.1, 0.15, 0.2, 0.25]) {
-    for (const bHp of [0.6, 0.7, 0.8, 0.9]) {
-      for (const cd of [0.0, 0.1, 0.2, 0.3, 0.4]) {
-        const atk = cd * 0.3;
-        s([d, bHp, 0.5, 0.8, true, false, false, false, cd, 0, 0.2],
-          [atk, 0, 0, 0, 0, 0, 1.0 - cd * 0.5]);
+  // 1e. Кулдаун почти готов (0.75-0.95) — продолжаем сближаться/стрейфить
+  for (const dist of [0.05,0.10,0.15,0.20,0.25]) {
+    for (const bHp of [0.5,0.65,0.8,0.9]) {
+      for (const cd of [0.75,0.80,0.85,0.90,0.95]) {
+        s([dist,bHp,0.5,0.85,1,0,0,0,cd,0,0.2],[cd*0.95,0,0,0,0,0,(1-cd)*0.5]);
       }
     }
   }
 
-  // Далеко — сближаемся через стрейф
-  for (const d of [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]) {
-    for (const bHp of [0.6, 0.7, 0.8, 0.9]) {
-      s([d, bHp, 0.5, 0.8, true, false, false, false, 0.5, 0, 0.1],
-        [0, 0, 0, 0, 0, 0, 1.0]);
-      s([d, bHp, 0.5, 0.8, false, false, false, false, 0.5, 0, 0.1],
-        [0, 0, 0, 0, 0.2, 0, 1.0]);
-    }
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 2: СТРЕЙФ (~1500 сценариев)
+  // ═══════════════════════════════════════════════════════════════════
 
-  // Нет меча — только стрейф и зелья
-  for (const d of [0.2, 0.3, 0.4]) {
-    for (const bHp of [0.7, 0.8, 0.9]) {
-      s([d, bHp, 0.5, 0.8, false, false, false, false, 0.8, 0, 0.3],
-        [0, 0, 0, 0, 0.3, 0, 0.9]);
-      s([d, bHp, 0.4, 0.8, false, true, false, false, 0.6, 0, 0.2],
-        [0, 0, 0.2, 0, 0.3, 0, 0.8]);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════════
-  // 3. ОТСТУПЛЕНИЕ — мало HP / окружён (~80)
-  // ════════════════════════════════════════════════════════════════════
-
-  // Критически мало HP (< 25%) — отступаем
-  for (const d of [0.1, 0.2, 0.3, 0.4]) {
-    for (const bHp of [0.05, 0.1, 0.15, 0.2]) {
-      for (const enemy of [0.2, 0.4, 0.6]) {
-        s([d, bHp, 0.6, 0.7, true, false, false, false, 0.5, 0, enemy],
-          [0, 1.0, 0, 0, 0, 0, 0]);
-        s([d, bHp, 0.7, 0.6, false, false, false, false, 0.5, 0, enemy],
-          [0, 1.0, 0, 0, 0, 0, 0]);
+  // 2a. Кулдаун не готов
+  for (const dist of [0.05,0.10,0.15,0.20,0.25,0.30]) {
+    for (const bHp of [0.4,0.5,0.6,0.7,0.8,0.9]) {
+      for (const cd of [0.0,0.1,0.2,0.3,0.4,0.5,0.6]) {
+        const atk = cd * 0.35;
+        const st  = clamp(0.9 - cd * 0.5, 0.3, 0.9);
+        s([dist,bHp,0.5,0.85,1,0,0,0,cd,0,0.2],[atk,0,0,0,0,0,st]);
       }
     }
   }
 
-  // Мало HP, нет хила, нет еды
-  for (const bHp of [0.15, 0.2, 0.25]) {
-    for (const tHp of [0.5, 0.7, 0.9]) {
-      s([0.2, bHp, tHp, 0.5, true, false, false, false, 0.5, 0, 0.4],
-        [0, 1.0, 0, 0, 0, 0, 0]);
-      s([0.3, bHp, tHp, 0.5, false, false, false, false, 0.5, 0, 0.3],
-        [0, 1.0, 0, 0, 0, 0, 0]);
-    }
-  }
-
-  // Много врагов — отступаем даже при среднем HP
-  for (const enemy of [0.6, 0.8, 1.0]) {
-    for (const bHp of [0.3, 0.4, 0.5, 0.6]) {
-      s([0.3, bHp, 0.5, 0.8, true, false, false, false, 0.6, 0, enemy],
-        [0, 1.0, 0, 0, 0.3, 0, 0]);
-      s([0.4, bHp, 0.6, 0.7, true, false, false, false, 0.5, 0, enemy],
-        [0, 0.9, 0, 0, 0.4, 0, 0]);
-    }
-  }
-
-  // Нет меча + мало HP + много врагов
-  for (const bHp of [0.2, 0.3, 0.4]) {
-    for (const enemy of [0.4, 0.6, 0.8]) {
-      s([0.3, bHp, 0.6, 0.5, false, false, false, false, 0.5, 0, enemy],
-        [0, 1.0, 0, 0, 0, 0, 0]);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════════
-  // 4. ЕДА — голодный (~70)
-  // ════════════════════════════════════════════════════════════════════
-
-  // Критический голод (< 20%) + еда есть
-  for (const hunger of [0.0, 0.05, 0.1, 0.15]) {
-    for (const d of [0.3, 0.4, 0.5, 0.6]) {
-      for (const bHp of [0.6, 0.7, 0.8]) {
-        s([d, bHp, 0.5, 0.8, true, true, false, false, 0.5, 0, 0.1],
-          [0, 0, 1.0, 0, 0, 0, 0.2]);
-        s([d, bHp, 0.4, 0.85, false, true, false, false, 0.5, 0, 0.1],
-          [0, 0, 1.0, 0, 0, 0, 0]);
+  // 2b. Далеко от цели (>0.35) — сближаемся через стрейф
+  for (const dist of [0.35,0.40,0.45,0.50,0.55,0.60,0.70,0.80,0.90,1.0]) {
+    for (const bHp of [0.4,0.5,0.6,0.7,0.8,0.9,1.0]) {
+      for (const tHp of [0.3,0.5,0.7,0.9]) {
+        s([dist,bHp,tHp,0.85,1,0,0,0,0.5,0,0.1],[0,0,0,0,0,0,1.0]);
+        s([dist,bHp,tHp,0.85,0,0,0,0,0.5,0,0.1],[0,0,0,0,0.15,0,1.0]);
       }
     }
   }
 
-  // Умеренный голод (20-40%) + далеко от врага
-  for (const hunger of [0.2, 0.25, 0.3, 0.35]) {
-    for (const d of [0.5, 0.6, 0.7]) {
-      s([d, 0.8, 0.5, 0.8, true, true, false, false, 0.5, 0, 0.1],
-        [0, 0, 0.8, 0, 0, 0, 0.4]);
-      s([d, 0.9, 0.4, 0.85, true, true, false, false, 0.4, 0, 0.1],
-        [0, 0, 0.75, 0, 0, 0, 0.5]);
-    }
-  }
-
-  // Нет еды — не едим
-  for (const hunger of [0.05, 0.1, 0.15]) {
-    for (const d of [0.3, 0.5]) {
-      s([d, 0.7, 0.5, 0.8, true, false, false, false, 0.8, 0, 0.2],
-        [0.7, 0, 0, 0, 0, 0, 0.3]);
-    }
-  }
-
-  // Еда + голод + мало HP — сначала поесть
-  for (const hunger of [0.1, 0.15]) {
-    for (const bHp of [0.3, 0.4]) {
-      s([0.5, bHp, 0.6, 0.5, true, true, false, false, 0.5, 0, 0.2],
-        [0, 0.3, 1.0, 0, 0, 0, 0]);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════════
-  // 5. ХИЛ-ЗЕЛЬЕ (throwHeal) — мало HP + есть зелье (~65)
-  // ════════════════════════════════════════════════════════════════════
-
-  // Критически мало HP — бросаем под себя немедленно
-  for (const bHp of [0.05, 0.1, 0.15]) {
-    for (const d of [0.1, 0.2, 0.3, 0.4]) {
-      for (const tHp of [0.4, 0.6, 0.8]) {
-        s([d, bHp, tHp, 0.5, true, false, true, false, 0.4, 0, 0.3],
-          [0, 1.0, 0, 1.0, 0, 0, 0]);
-        s([d, bHp, tHp, 0.5, false, false, true, false, 0.4, 0, 0.2],
-          [0, 1.0, 0, 1.0, 0, 0, 0]);
+  // 2c. Стрейф vs несколько врагов
+  for (const dist of [0.10,0.15,0.20,0.25]) {
+    for (const bHp of [0.4,0.5,0.6,0.7]) {
+      for (const enemy of [0.4,0.6,0.8,1.0]) {
+        const retreat = enemy * 0.4;
+        const st = clamp(0.7 - retreat * 0.3, 0.3, 0.7);
+        s([dist,bHp,0.5,0.8,1,0,0,0,0.8,0,enemy],[0.5-retreat*0.2,retreat,0,0,0,0,st]);
       }
     }
   }
 
-  // Мало HP (15-30%) + есть хил
-  for (const bHp of [0.2, 0.25, 0.3]) {
-    for (const d of [0.2, 0.35, 0.5]) {
-      s([d, bHp, 0.6, 0.5, true, false, true, false, 0.5, 0, 0.3],
-        [0, 0.8, 0, 0.9, 0, 0, 0]);
-      s([d, bHp, 0.5, 0.55, true, true, true, false, 0.4, 0, 0.2],
-        [0, 0.6, 0.3, 0.85, 0, 0, 0]);
-    }
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 3: ОТСТУПЛЕНИЕ (~800 сценариев)
+  // ═══════════════════════════════════════════════════════════════════
 
-  // Хорошее HP — хил не нужен
-  for (const bHp of [0.6, 0.7, 0.8]) {
-    for (const d of [0.15, 0.25]) {
-      s([d, bHp, 0.5, 0.8, true, false, true, false, 1.0, 0, 0.2],
-        [0.9, 0, 0, 0, 0, 0, 0.1]);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════════
-  // 6. ЗЕЛЬЕ НА ВРАГА (throwPotion) — много врагов / close combat (~50)
-  // ════════════════════════════════════════════════════════════════════
-
-  // Много врагов — AOE зелье
-  for (const enemy of [0.6, 0.8, 1.0]) {
-    for (const d of [0.3, 0.4, 0.5]) {
-      for (const bHp of [0.5, 0.6, 0.7]) {
-        s([d, bHp, 0.5, 0.8, true, false, false, false, 0.5, 0, enemy],
-          [0, 0.3, 0, 0, 1.0, 0, 0]);
-        s([d, bHp, 0.6, 0.7, false, false, false, false, 0.5, 0, enemy],
-          [0, 0.4, 0, 0, 1.0, 0, 0]);
+  // 3a. Очень низкое HP (< 0.2 = 4 HP)
+  for (const dist of [0.05,0.10,0.15,0.20,0.30,0.40]) {
+    for (const bHp of [0.02,0.05,0.08,0.10,0.12,0.15,0.18]) {
+      for (const food of [0,1]) {
+        for (const heal of [0,1]) {
+          const r = heal ? 0.2 : (food ? 0.3 : 0.85);
+          const h = heal ? 0.9 : 0;
+          const e = food && !heal ? 0.5 : 0;
+          s([dist,bHp,0.5,0.8,1,food,heal,0,0.8,0,0.2],[0,r,e,h,0,0,0.1]);
+        }
       }
     }
   }
 
-  // Один враг + близко + нет меча
-  for (const d of [0.2, 0.3]) {
-    for (const bHp of [0.6, 0.7, 0.8]) {
-      s([d, bHp, 0.5, 0.8, false, false, false, false, 0.5, 0, 0.2],
-        [0, 0, 0, 0, 0.8, 0, 0.5]);
-    }
-  }
-
-  // Зелье + отступ — много врагов, мало HP
-  for (const bHp of [0.25, 0.3]) {
-    for (const enemy of [0.6, 0.8]) {
-      s([0.35, bHp, 0.6, 0.5, true, false, false, false, 0.5, 0, enemy],
-        [0, 0.8, 0, 0, 0.7, 0, 0]);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════════
-  // 7. ПЕРК (throwPerk) — бафф готов + хорошие условия (~50)
-  // ════════════════════════════════════════════════════════════════════
-
-  // Перк в начале боя (оба с полным HP)
-  for (const d of [0.1, 0.15, 0.2]) {
-    for (const bHp of [0.8, 0.9, 1.0]) {
-      for (const tHp of [0.8, 0.9, 1.0]) {
-        s([d, bHp, tHp, 0.8, true, false, false, true, 1.0, 0, 0.2],
-          [0.8, 0, 0, 0, 0, 1.0, 0.1]);
-        s([d, bHp, tHp, 0.8, true, true, false, true, 0.9, 0, 0.1],
-          [0.7, 0, 0, 0, 0, 0.9, 0.2]);
+  // 3b. Низкое HP + несколько врагов
+  for (const dist of [0.05,0.10,0.15,0.20,0.30]) {
+    for (const bHp of [0.1,0.15,0.2,0.25,0.3]) {
+      for (const enemy of [0.4,0.6,0.8,1.0]) {
+        const r = clamp(0.4 + enemy * 0.3 + (0.3 - bHp), 0.3, 0.95);
+        s([dist,bHp,0.5,0.8,1,0,0,0,0.7,0,enemy],[0,r,0,0,0,0,0.1]);
+        s([dist,bHp,0.5,0.8,1,1,0,0,0.7,0,enemy],[0,r*0.6,0.4,0,0,0,0.1]);
       }
     }
   }
 
-  // Перк + союзники
-  for (const ally of [0.2, 0.4]) {
-    for (const d of [0.15, 0.2]) {
-      s([d, 0.85, 0.5, 0.8, true, false, false, true, 1.0, ally, 0.2],
-        [1.0, 0, 0, 0, 0, 1.0, 0.1]);
+  // 3c. Outnumbered + нет зелий
+  for (const bHp of [0.15,0.2,0.25,0.3,0.35]) {
+    for (const enemy of [0.6,0.8,1.0]) {
+      s([0.15,bHp,0.7,0.75,1,0,0,0,0.8,0,enemy],[0,0.9,0,0,0,0,0.05]);
+      s([0.10,bHp,0.8,0.75,1,0,0,0,0.9,0,enemy],[0.3,0.65,0,0,0,0,0.05]);
     }
   }
 
-  // Перк не нужен при плохом HP
-  for (const bHp of [0.15, 0.2, 0.25]) {
-    s([0.2, bHp, 0.7, 0.4, true, false, false, true, 0.5, 0, 0.5],
-      [0, 1.0, 0, 0, 0, 0, 0]);
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 4: ЕДА (~2000 сценариев)
+  // ═══════════════════════════════════════════════════════════════════
 
-  // ════════════════════════════════════════════════════════════════════
-  // 8. КОМБО-СИТУАЦИИ — смешанные действия (~65+)
-  // ════════════════════════════════════════════════════════════════════
-
-  // Атака + стрейф одновременно
-  s([0.1, 0.8, 0.5, 0.8, true, false, false, false, 1.0, 0, 0.3],  [1.0, 0, 0, 0, 0, 0, 0.3]);
-  s([0.15,0.9, 0.6, 0.8, true, false, false, false, 0.95,0, 0.2],  [0.95,0, 0, 0, 0, 0, 0.2]);
-  s([0.2, 0.7, 0.4, 0.8, true, false, false, false, 0.9, 0, 0.2],  [0.9, 0, 0, 0, 0, 0, 0.25]);
-  s([0.05,0.9, 0.5, 0.8, true, false, false, false, 1.0, 0, 0.1],  [1.0, 0, 0, 0, 0, 0, 0.05]);
-  s([0.08,1.0, 1.0, 0.5, true, false, false, false, 1.0, 0, 0.2],  [1.0, 0, 0, 0, 0, 0, 0.2]);
-
-  // Перк + атака (перк в начале раунда)
-  s([0.15,0.9, 0.5, 0.8, true, false, false, true, 1.0, 0, 0.1],   [1.0, 0, 0, 0, 0, 0.9, 0.1]);
-  s([0.2, 0.85,0.4, 0.8, true, true, false, true,  0.9, 0, 0.1],   [0.85,0, 0, 0, 0, 0.8, 0.2]);
-  s([0.1, 0.95,0.6, 0.8, true, false, false, true,  1.0, 0.3, 0.2],[1.0, 0, 0, 0, 0, 1.0, 0.1]);
-
-  // Отступ + хил
-  s([0.2, 0.1, 0.5, 0.3, true, false, true, false,  0.5, 0, 0.4],  [0, 1.0, 0, 1.0, 0, 0, 0]);
-  s([0.15,0.15,0.7, 0.3, false, false, true, false,  0.4, 0, 0.3], [0, 1.0, 0, 1.0, 0, 0, 0]);
-  s([0.25,0.2, 0.6, 0.3, true, true, true, false,  0.3, 0, 0.3],   [0, 0.9, 0, 1.0, 0, 0, 0]);
-  s([0.3, 0.12,0.8, 0.25,true, false, true, false,  0.5, 0, 0.5],  [0, 1.0, 0, 1.0, 0, 0, 0]);
-
-  // Еда + стрейф (голодный, враг далеко)
-  s([0.6, 0.8, 0.5, 0.8, true, true, false, false, 0.5, 0, 0.1],   [0, 0, 0.9, 0, 0, 0, 0.5]);
-  s([0.7, 0.9, 0.4, 0.85, true, true, false, false, 0.4, 0, 0.1],  [0, 0, 0.85,0, 0, 0, 0.6]);
-  s([0.5, 0.7, 0.5, 0.8, false, true, false, false, 0.5, 0, 0.1],  [0, 0, 0.9, 0, 0, 0, 0.4]);
-
-  // Середина боя (оба ~50% HP)
-  s([0.2, 0.5, 0.5, 0.5, true, true, true, false, 0.9, 0, 0.2],    [0.7, 0, 0.2, 0.3, 0, 0, 0.2]);
-  s([0.25,0.45,0.45,0.5, true, false, true, false, 0.7, 0, 0.2],   [0.5, 0.2,0, 0.4, 0, 0, 0.3]);
-  s([0.15,0.5, 0.5, 0.5, true, false, false, false, 1.0, 0, 0.2],  [0.85,0, 0, 0, 0, 0, 0.2]);
-  s([0.2, 0.55,0.55,0.5, true, true, true, false, 0.85, 0.2, 0.2], [0.8, 0, 0.1, 0, 0, 0, 0.2]);
-
-  // Финальная стадия (оба почти мертвы)
-  s([0.1, 0.15,0.15,0.5, true, true, true, false, 1.0, 0, 0.1],    [0.8, 0, 0.3, 0.5, 0, 0, 0]);
-  s([0.15,0.2, 0.2, 0.5, true, false, true, false, 0.8, 0, 0.1],   [0.6, 0.2,0, 0.6, 0, 0, 0]);
-  s([0.1, 0.18,0.1, 0.5, true, false, false, false, 1.0, 0, 0.1],  [1.0, 0, 0, 0, 0, 0, 0]);
-  s([0.1, 0.25,0.05,0.6, true, false, false, false, 1.0, 0, 0.1],  [1.0, 0, 0, 0, 0, 0, 0]);
-
-  // Оба с полным HP — стандартный 1v1
-  s([0.15,1.0, 1.0, 0.5, true, false, false, false, 1.0, 0, 0.2],  [1.0, 0, 0, 0, 0, 0, 0.2]);
-  s([0.2, 1.0, 1.0, 0.5, true, false, false, true,  1.0, 0, 0.1],  [0.5, 0, 0, 0, 0, 1.0, 0.3]);
-  s([0.1, 1.0, 1.0, 0.5, true, true, false, false, 1.0, 0, 0.1],   [1.0, 0, 0, 0, 0, 0, 0.1]);
-
-  // Бот застрял — стрейф
-  s([0.9, 0.9, 0.5, 0.8, true, false, false, false, 0.8, 0, 0.1],  [0, 0, 0, 0, 0, 0, 1.0]);
-  s([1.0, 0.8, 0.6, 0.7, true, false, false, false, 0.5, 0, 0.1],  [0, 0, 0, 0, 0, 0, 1.0]);
-  s([0.85,0.7, 0.7, 0.5, false, false, false, false, 0.5, 0, 0.2], [0, 0, 0, 0, 0.3, 0, 1.0]);
-
-  // Критический хит (1.5 блока = дистанция 0.05)
-  s([0.05,0.9, 0.5, 0.8, true, false, false, false, 1.0, 0, 0.2],  [1.0, 0, 0, 0, 0, 0, 0]);
-  s([0.05,0.8, 0.8, 0.5, true, false, false, false, 1.0, 0, 0.1],  [1.0, 0, 0, 0, 0, 0, 0.1]);
-  s([0.08,0.9, 0.3, 0.8, true, false, false, false, 1.0, 0, 0.1],  [1.0, 0, 0, 0, 0, 0, 0]);
-
-  // Сложные: бафф + атака + много союзников
-  s([0.15,0.9, 0.5, 0.8, true, false, false, true, 1.0, 0.4, 0.2], [1.0, 0, 0, 0, 0, 0.9, 0]);
-  s([0.2, 0.85,0.6, 0.75,true, true, false, true,  0.95,0.6, 0.3], [0.9, 0, 0, 0, 0, 0.85,0.1]);
-  s([0.1, 1.0, 0.4, 0.8, true, false, false, true,  1.0, 0.8, 0.2],[1.0, 0, 0, 0, 0, 1.0, 0]);
-
-  // Сложные: мало HP, есть все зелья — приоритет хила
-  s([0.3, 0.2, 0.6, 0.4, true, true, true, true, 0.5, 0, 0.4],     [0, 0.7, 0, 1.0, 0, 0, 0]);
-  s([0.25,0.18,0.7, 0.3, false, true, true, true,  0.3, 0, 0.3],   [0, 1.0, 0, 1.0, 0, 0, 0]);
-  s([0.2, 0.22,0.5, 0.4, true, false, true, false, 0.6, 0, 0.5],   [0, 0.8, 0, 0.9, 0, 0, 0]);
-
-  // Нет оружия, есть зелья — атакуем зельями
-  s([0.3, 0.8, 0.5, 0.8, false, false, false, false, 0.5, 0, 0.4], [0, 0, 0, 0, 0.9, 0, 0.5]);
-  s([0.4, 0.9, 0.4, 0.85, false, true, false, true,  0.5, 0, 0.3], [0, 0, 0.2, 0, 0.7, 0.4, 0.4]);
-  s([0.25,0.7, 0.6, 0.7, false, false, false, true,  0.6, 0, 0.3], [0, 0, 0, 0, 0.6, 0.8, 0.4]);
-
-  // Еда + голод + близко к врагу (трудный выбор)
-  s([0.2, 0.65,0.5, 0.7, true, true, false, false, 1.0, 0, 0.2],   [0.85,0, 0, 0, 0, 0, 0.1]);
-  s([0.3, 0.7, 0.5, 0.7, true, true, false, false, 0.5, 0, 0.2],   [0.2, 0, 0.5, 0, 0, 0, 0.6]);
-  s([0.5, 0.8, 0.4, 0.8, true, true, false, false, 0.3, 0, 0.1],   [0, 0, 0.8, 0, 0, 0, 0.5]);
-  s([0.1, 0.9, 0.5, 0.8, true, true, false, false, 0.0, 0, 0.2],   [0, 0, 0, 0, 0, 0, 1.0]);
-
-  // Полный дефицит HP + окружён
-  for (const bHp of [0.05, 0.08]) {
-    for (const enemy of [0.4, 0.6, 0.8]) {
-      s([0.2, bHp, 0.7, 0.3, true, false, false, false, 0.5, 0, enemy], [0, 1.0, 0, 0, 0, 0, 0]);
-      s([0.3, bHp, 0.8, 0.25, false, false, false, false, 0.4, 0, enemy],[0, 1.0, 0, 0, 0, 0, 0]);
+  // 4a. Голодный + нормальное HP → ешь
+  for (const dist of [0.05,0.10,0.15,0.20,0.30,0.50]) {
+    for (const hunger of [0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.65]) {
+      for (const bHp of [0.5,0.6,0.7,0.8,0.9,1.0]) {
+        // Чем дальше враг, тем безопаснее есть
+        const eatVal = clamp(0.9 - dist * 0.3 - bHp * 0.1 + (0.7 - hunger) * 0.5, 0.3, 0.95);
+        const atkVal = clamp(dist < 0.2 ? 0.6 - eatVal * 0.4 : 0, 0, 0.5);
+        s([dist,bHp,0.5,hunger,1,1,0,0,0.5,0,0.2],[atkVal,0,eatVal,0,0,0,0.05]);
+      }
     }
   }
 
-  log.info?.(`[PvpBrain] buildSeedData: ${data.length} сценариев`);
+  // 4b. Голодный + низкое HP → сначала еда, потом зелье
+  for (const dist of [0.05,0.10,0.20,0.30]) {
+    for (const hunger of [0.1,0.2,0.3,0.4]) {
+      for (const bHp of [0.1,0.15,0.2,0.25,0.3]) {
+        const heal = bHp < 0.2 ? 0.6 : 0.2;
+        const eat  = clamp(0.8 - bHp * 0.5, 0.3, 0.8);
+        s([dist,bHp,0.5,hunger,1,1,1,0,0.7,0,0.2],[0,0.1,eat,heal,0,0,0]);
+        s([dist,bHp,0.5,hunger,1,1,0,0,0.7,0,0.2],[0,0.2,eat,0,0,0,0]);
+      }
+    }
+  }
+
+  // 4c. Полный голод, нет угрозы
+  for (const dist of [0.5,0.6,0.7,0.8,1.0]) {
+    for (const bHp of [0.5,0.6,0.7,0.8,0.9,1.0]) {
+      for (const hunger of [0.0,0.1,0.2,0.3,0.4,0.5]) {
+        s([dist,bHp,0.5,hunger,1,1,0,0,0.5,0,0.1],[0,0,0.95,0,0,0,0.05]);
+      }
+    }
+  }
+
+  // 4d. Не нужна еда (сытый)
+  for (const dist of [0.10,0.15,0.20,0.25]) {
+    for (const bHp of [0.6,0.7,0.8,0.9,1.0]) {
+      for (const hunger of [0.75,0.80,0.85,0.90,0.95,1.0]) {
+        s([dist,bHp,0.5,hunger,1,1,0,0,1.0,0,0.2],[0.95,0,0,0,0,0,0.05]);
+      }
+    }
+  }
+
+  // 4e. Голодный но далеко — ешь без страха
+  for (const dist of [0.6,0.7,0.8,0.9,1.0]) {
+    for (const hunger of [0.0,0.1,0.2,0.3]) {
+      for (const bHp of [0.3,0.4,0.5,0.6,0.7]) {
+        s([dist,bHp,0.5,hunger,1,1,0,0,0.5,0,0.1],[0,0,1.0,0,0,0,0]);
+      }
+    }
+  }
+
+  // 4f. Еды нет — не едим
+  for (const dist of [0.10,0.15,0.20]) {
+    for (const bHp of [0.3,0.4,0.5]) {
+      for (const hunger of [0.1,0.2,0.3]) {
+        s([dist,bHp,0.5,hunger,1,0,0,0,0.8,0,0.2],[0.4,0.4,0,0,0,0,0.2]);
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 5: ХИЛКИ И ЗЕЛЬЯ (~1500 сценариев)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // 5a. Хил-зелье при низком HP
+  for (const dist of [0.05,0.10,0.15,0.20,0.30]) {
+    for (const bHp of [0.05,0.10,0.15,0.20,0.25,0.30,0.35,0.40]) {
+      const urgency = clamp(1.0 - bHp * 2, 0.4, 1.0);
+      s([dist,bHp,0.5,0.8,1,0,1,0,0.7,0,0.2],[0,bHp<0.15?0.4:0.1,0,urgency,0,0,0]);
+      s([dist,bHp,0.5,0.7,1,1,1,0,0.7,0,0.2],[0,0.05,0.2,urgency*0.8,0,0,0]);
+      // Хилка + перк
+      s([dist,bHp,0.5,0.8,1,0,1,1,0.7,0,0.2],[0,0.1,0,urgency,0,0.3,0]);
+    }
+  }
+
+  // 5b. Буф-зелье при хорошем HP
+  for (const dist of [0.10,0.15,0.20,0.25]) {
+    for (const bHp of [0.6,0.7,0.75,0.8,0.85,0.9,0.95,1.0]) {
+      for (const hunger of [0.75,0.85,0.90,0.95,1.0]) {
+        s([dist,bHp,0.5,hunger,1,0,1,0,0.9,0,0.2],[0.7,0,0,0,0,0.85,0.1]);
+        s([dist,bHp,0.6,hunger,1,0,1,0,1.0,0.4,0.2],[0.8,0,0,0,0,0.85,0.05]);
+      }
+    }
+  }
+
+  // 5c. Зелье на врага (яд/слабость)
+  for (const dist of [0.1,0.15,0.20,0.25,0.30]) {
+    for (const bHp of [0.5,0.6,0.7,0.8]) {
+      for (const tHp of [0.6,0.7,0.8,0.9,1.0]) {
+        s([dist,bHp,tHp,0.85,0,0,1,0,0.8,0,0.2],[0.2,0,0,0,0.85,0,0.1]);
+        s([dist,bHp,tHp,0.85,1,0,1,0,0.9,0,0.2],[0.5,0,0,0,0.6,0,0.1]);
+      }
+    }
+  }
+
+  // 5d. Нет зелий — не применяем
+  for (const dist of [0.10,0.15,0.20]) {
+    for (const bHp of [0.3,0.4,0.5]) {
+      s([dist,bHp,0.5,0.75,1,0,0,0,0.9,0,0.2],[0.6,0.2,0,0,0,0,0.2]);
+      s([dist,bHp,0.5,0.75,1,0,0,0,1.0,0,0.1],[0.9,0,0,0,0,0,0.1]);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 6: ДВИЖЕНИЕ / ХОДЬБА (~1000 сценариев)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // 6a. Преследование далёкой цели
+  for (const dist of [0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,1.0]) {
+    for (const bHp of [0.4,0.5,0.6,0.7,0.8,0.9,1.0]) {
+      for (const cd of [0.0,0.3,0.5,0.7,1.0]) {
+        s([dist,bHp,0.5,0.85,1,0,0,0,cd,0,0.1],[0,0,0,0,0,0,1.0]);
+        s([dist,bHp,0.5,0.85,0,0,0,0,cd,0,0.1],[0,0,0,0,0,0,1.0]);
+      }
+    }
+  }
+
+  // 6b. Подход к цели (0.2-0.35) — кулдаун почти готов
+  for (const dist of [0.20,0.22,0.25,0.28,0.30,0.32,0.35]) {
+    for (const bHp of [0.5,0.6,0.7,0.8,0.9]) {
+      for (const cd of [0.5,0.6,0.7,0.8,0.85,0.9]) {
+        const atk = cd > 0.8 ? cd * 0.9 : 0;
+        const st  = atk > 0 ? 0.1 : 0.8;
+        s([dist,bHp,0.5,0.85,1,0,0,0,cd,0,0.1],[atk,0,0,0,0,0,st]);
+      }
+    }
+  }
+
+  // 6c. Цели нет — стоим/патрулируем
+  for (let i = 0; i < 100; i++) {
+    const bHp = 0.5 + Math.random() * 0.5;
+    const hunger = 0.5 + Math.random() * 0.5;
+    s([1.0,bHp,0.5,hunger,1,0,0,0,0.5,0,0],[0,0,0,0,0,0,1.0]);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 7: ГРАНИЧНЫЕ СЛУЧАИ / СИТУАЦИИ (~700 сценариев)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // 7a. Бот умирает (hp < 0.05) — только retreat
+  for (const dist of [0.05,0.1,0.15,0.2,0.3]) {
+    for (const heal of [0,1]) {
+      s([dist,0.02,0.5,0.8,1,0,heal,0,0.8,0,0.2],[0,0.9,0,heal?0.9:0,0,0,0.05]);
+      s([dist,0.04,0.5,0.8,1,0,heal,0,0.8,0,0.5],[0,0.95,0,heal?0.85:0,0,0,0.02]);
+    }
+  }
+
+  // 7b. Оба на одинаковом HP — агрессивная атака
+  for (const dist of [0.05,0.10,0.15,0.20]) {
+    for (const hp of [0.4,0.5,0.6,0.7]) {
+      s([dist,hp,hp,0.85,1,0,0,0,1.0,0,0.1],[0.95,0,0,0,0,0,0.05]);
+      s([dist,hp,hp,0.8,1,0,0,1,1.0,0,0.1],[0.8,0,0,0,0,0.75,0.05]);
+    }
+  }
+
+  // 7c. Враг сильнее (tgtHp > botHp значительно)
+  for (const dist of [0.10,0.15,0.20,0.25]) {
+    for (const bHp of [0.2,0.3,0.4,0.5]) {
+      for (const tHp of [0.7,0.8,0.9,1.0]) {
+        s([dist,bHp,tHp,0.8,1,1,0,0,0.9,0,0.2],[0.3,0.4,0.3,0,0,0,0.1]);
+        s([dist,bHp,tHp,0.8,1,0,1,0,0.9,0,0.2],[0,0.5,0,0.6,0,0,0.1]);
+      }
+    }
+  }
+
+  // 7d. Первые секунды боя (cd=0, kd=0)
+  for (const dist of [0.10,0.15,0.20,0.25,0.30]) {
+    for (const bHp of [0.8,0.9,1.0]) {
+      s([dist,bHp,1.0,0.95,1,0,0,1,0.0,0,0.2],[0,0,0,0,0,0.9,0.1]);
+      s([dist,bHp,1.0,0.95,1,0,0,0,0.0,0,0.2],[0,0,0,0,0,0,1.0]);
+    }
+  }
+
+  // 7e. Перк + атака — комбо
+  for (const dist of [0.10,0.15,0.20]) {
+    for (const bHp of [0.7,0.8,0.9,1.0]) {
+      s([dist,bHp,0.6,0.9,1,0,1,0,1.0,0,0.2],[0.6,0,0,0,0,0.8,0.1]);
+      s([dist,bHp,0.5,0.9,1,0,1,0,0.95,0,0.2],[0.7,0,0,0,0,0.7,0.1]);
+    }
+  }
+
+  // 7f. Сложные сценарии — несколько условий одновременно
+  // [низкое HP + голод + враги + без зелий]
+  for (const bHp of [0.15,0.20,0.25,0.30]) {
+    for (const hunger of [0.1,0.2,0.3]) {
+      for (const enemy of [0.4,0.6,0.8]) {
+        s([0.10,bHp,0.6,hunger,1,1,0,0,0.7,0,enemy],[0,0.5,0.4,0,0,0,0.1]);
+        s([0.15,bHp,0.6,hunger,1,0,1,0,0.7,0,enemy],[0,0.4,0,0.7,0,0,0.1]);
+      }
+    }
+  }
+
+  // 7g. Союзники атакуют (бот не в риске — может рискнуть)
+  for (const dist of [0.10,0.15,0.20,0.25]) {
+    for (const bHp of [0.3,0.4,0.5]) {
+      for (const ally of [0.4,0.6,0.8,1.0]) {
+        s([dist,bHp,0.7,0.8,1,0,0,0,0.9,ally,0.2],[0.7,0,0,0,0,0,0.2]);
+        s([dist,bHp,0.5,0.8,1,0,0,0,1.0,ally,0.2],[0.9,0,0,0,0,0,0.05]);
+      }
+    }
+  }
+
+  log.info(`[PvpBrain] Сгенерировано ${data.length} обучающих сценариев`);
   return data;
 }
 
+// ─── Класс PvpBrain ───────────────────────────────────────────────────────
 class PvpBrain {
   constructor() {
-    this._net = null;
-    this._loadNet();
-    this._lastAttackTime = 0;
-    this._trainingData   = [];
+    this.net = null;
+    this._initNet();
   }
 
-  _loadNet() {
-    if (!brain) return;
+  _initNet() {
+    if (!brain) { this.net = null; return; }
+    this.net = new brain.NeuralNetwork({
+      hiddenLayers:    [24, 18, 12],
+      activation:      "sigmoid",
+      learningRate:    0.05,
+      momentum:        0.1,
+      errorThresh:     0.003,
+    });
+
+    // Загружаем сохранённые веса
     try {
-      this._net = new brain.NeuralNetwork({
-        hiddenLayers: [24, 18, 12],
-        activation:   "sigmoid",
-        learningRate: 0.03,
-        momentum:     0.1,
-      });
       if (fs.existsSync(WEIGHTS_PATH)) {
         const w = JSON.parse(fs.readFileSync(WEIGHTS_PATH, "utf8"));
-        this._net.fromJSON(w);
-        log.info("[PvpBrain] Загружены веса из", WEIGHTS_PATH);
-      } else {
-        log.info("[PvpBrain] Нет весов — обучаем на 500 сценариях...");
-        this._trainWithSeedData();
+        this.net.fromJSON(w);
+        log.info("[PvpBrain] Загружены веса из файла");
+        return;
       }
-    } catch (err) {
-      log.warn("[PvpBrain] Ошибка загрузки:", err.message);
-      this._net = null;
+    } catch (e) {
+      log.warn("[PvpBrain] Не удалось загрузить веса:", e.message);
     }
-  }
 
-  _trainWithSeedData() {
-    if (!this._net) return;
+    // Обучение
+    log.info("[PvpBrain] Запускаем обучение (10000+ сценариев)...");
     const data = buildSeedData();
     try {
-      const result = this._net.train(data, {
-        iterations:  12000,
-        errorThresh: 0.005,
-        log:         false,
+      this.net.train(data, {
+        iterations:    16000,
+        errorThresh:   0.003,
+        logPeriod:     4000,
+        log: (s) => log.info("[PvpBrain] train:", s),
       });
-      this._saveWeights();
-      log.info(`[PvpBrain] Обучение завершено: ${result.iterations} итераций, err=${result.error?.toFixed(4)}, сценариев=${data.length}`);
-    } catch (err) {
-      log.warn("[PvpBrain] Ошибка обучения:", err.message);
-    }
-  }
-
-  retrainFromSeed() {
-    if (!this._net) return;
-    const data = buildSeedData();
-    try {
-      this._net.train(data, { iterations: 5000, errorThresh: 0.008, log: false });
-      this._saveWeights();
-      log.info("[PvpBrain] Переобучено из сид-данных");
-    } catch (err) {
-      log.warn("[PvpBrain] retrainFromSeed:", err.message);
-    }
-  }
-
-  _saveWeights() {
-    if (!this._net) return;
-    try { fs.writeFileSync(WEIGHTS_PATH, JSON.stringify(this._net.toJSON(), null, 2)); } catch {}
-  }
-
-  recordExperience(inputFeatures, actionTaken, wasGood) {
-    if (!inputFeatures || inputFeatures.length !== 12) return;
-    const acts = ["attack","retreat","eat","throwHeal","throwPotion","throwPerk","strafe"];
-    const output = acts.map(a => wasGood && actionTaken[a] ? 1 : 0);
-    this._trainingData.push({ input: inputFeatures, output });
-    if (this._trainingData.length >= 25) this._retrainIncremental();
-  }
-
-  _retrainIncremental() {
-    if (!this._net || this._trainingData.length === 0) return;
-    try {
-      const combined = [...buildSeedData(), ...this._trainingData];
-      this._net.train(combined, { iterations: 500, errorThresh: 0.03, log: false });
-      this._saveWeights();
-      this._trainingData = [];
-      log.info("[PvpBrain] Инкрементальное переобучение завершено");
-    } catch (err) {
-      log.warn("[PvpBrain] Ошибка переобучения:", err.message);
-    }
-  }
-
-  decide(bot, target, teammates = []) {
-    const features = getBotFeatures(bot, target, teammates);
-    if (!features) return { action: "strafe", confidence: 0.5, rawOutput: [], features: null };
-
-    if (this._net) {
+      // Сохраняем веса
       try {
-        const raw    = this._net.run(features);
-        const rawArr = Array.isArray(raw) ? raw : Array.from(raw);
-        const actions = ["attack","retreat","eat","throwHeal","throwPotion","throwPerk","strafe"];
-        let bestIdx = 0;
-        for (let i = 1; i < rawArr.length; i++) {
-          if (rawArr[i] > rawArr[bestIdx]) bestIdx = i;
-        }
-        return {
-          action:     actions[bestIdx],
-          confidence: rawArr[bestIdx],
-          rawOutput:  rawArr,
-          features,
-        };
-      } catch (err) {
-        log.warn("[PvpBrain] decide error:", err.message);
+        fs.writeFileSync(WEIGHTS_PATH, JSON.stringify(this.net.toJSON()), "utf8");
+        log.info("[PvpBrain] Веса сохранены →", WEIGHTS_PATH);
+      } catch (e) { log.warn("[PvpBrain] Не сохранить веса:", e.message); }
+    } catch (e) {
+      log.error("[PvpBrain] Ошибка обучения:", e.message);
+    }
+  }
+
+  decide(bot, target, teammates = [], extra = {}) {
+    const features = getBotFeatures(bot, target, teammates);
+    if (!features) return { action: "attack", confidence: 0.5, features };
+
+    const ACTIONS = ["attack","retreat","eat","throwHeal","throwPotion","throwPerk","strafe"];
+
+    // Нейросеть
+    if (this.net) {
+      try {
+        const out = this.net.run(features);
+        const scores = ACTIONS.map((a, i) => ({ action: a, score: out[i] || 0 }));
+        scores.sort((a, b) => b.score - a.score);
+        const best = scores[0];
+        return { action: best.action, confidence: best.score, features };
+      } catch (e) {
+        log.debug("[PvpBrain] run error:", e.message);
       }
     }
 
-    return this._heuristicDecide(features);
+    // Эвристика (фоллбэк)
+    return this._heuristic(features, bot, target, extra);
   }
 
-  _heuristicDecide(features) {
-    const [dist, botHp, targetHp,, hunger, hasSword, hasFood, hasHeal, hasBuff, attackCd, allies, enemies] = features;
-    const scores = [0, 0, 0, 0, 0, 0, 0]; // [atk, ret, eat, heal, pot, perk, strf]
+  _heuristic(f, bot, target, extra = {}) {
+    const [dist, botHp, tgtHp, hpDiff, hunger, sword, food, heal, buff, cd, ally, enemy] = f;
+    const ACTIONS = ["attack","retreat","eat","throwHeal","throwPotion","throwPerk","strafe"];
 
-    if (botHp < 0.12 && hasHeal)          scores[3] = 0.98;
-    else if (botHp < 0.22 && hasHeal)     scores[3] = 0.88;
-    if (botHp < 0.22)                     scores[1] = Math.max(scores[1], 0.85);
-    if (enemies > 0.5 && botHp < 0.45)   scores[1] = Math.max(scores[1], 0.82);
-    if (hunger < 0.2 && hasFood)          scores[2] = 0.80;
-    if (hasBuff && botHp > 0.5 && dist < 0.4) scores[5] = 0.72;
-    if (enemies > 0.6)                    scores[4] = Math.max(scores[4], 0.70);
-    if (dist < 0.3 && attackCd > 0.9 && hasSword)  scores[0] = 0.95;
-    else if (dist < 0.4 && attackCd > 0.8 && hasSword) scores[0] = Math.max(scores[0], 0.80);
-    if (dist > 0.45 || attackCd < 0.4)   scores[6] = Math.max(scores[6], 0.65);
-    if (botHp > 0.65 && attackCd > 0.85 && hasSword) scores[0] = Math.max(scores[0], 0.75);
-
-    let best = 0;
-    for (let i = 1; i < scores.length; i++) if (scores[i] > scores[best]) best = i;
-    const actions = ["attack","retreat","eat","throwHeal","throwPotion","throwPerk","strafe"];
-    return { action: actions[best], confidence: scores[best], rawOutput: scores, features };
+    if (botHp < 0.1) return { action: heal ? "throwHeal" : (food ? "eat" : "retreat"), confidence: 0.9, features: f };
+    if (botHp < 0.25 && heal) return { action: "throwHeal", confidence: 0.8, features: f };
+    if (botHp < 0.4 && food && hunger < 0.7) return { action: "eat", confidence: 0.75, features: f };
+    if (dist < 0.35 && cd > 0.75 && sword) return { action: "attack", confidence: cd * 0.9, features: f };
+    if (dist > 0.35) return { action: "strafe", confidence: 0.8, features: f };
+    if (cd < 0.5) return { action: "strafe", confidence: 0.85, features: f };
+    return { action: "attack", confidence: 0.5, features: f };
   }
 
-  getWeightsPath() { return WEIGHTS_PATH; }
-  hasWeights()     { return fs.existsSync(WEIGHTS_PATH); }
+  recordExperience(features, actionMap, wasGood) {
+    if (!this.net || !features) return;
+    // Онлайн-обучение: усиливаем/ослабляем действие
+    try {
+      const ACTIONS = ["attack","retreat","eat","throwHeal","throwPotion","throwPerk","strafe"];
+      const current = this.net.run(features);
+      const target  = [...current];
+      ACTIONS.forEach((a, i) => {
+        if (actionMap[a]) target[i] = clamp(current[i] + (wasGood ? 0.08 : -0.05), 0, 1);
+      });
+      this.net.train([{ input: features, output: target }], { iterations: 3, errorThresh: 0.05 });
+    } catch {}
+  }
 }
 
-module.exports = { PvpBrain, getBotFeatures };
+module.exports = { PvpBrain };
