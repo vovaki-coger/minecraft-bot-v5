@@ -1,0 +1,203 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg:          #05070f;
+  --panel:       #090c18;
+  --panel2:      #0d1120;
+  --border:      #1a2040;
+  --border-lit:  rgba(0,200,255,.3);
+  --neon-cyan:   #00c8ff;
+  --neon-green:  #00ff9d;
+  --neon-purple: #9d60ff;
+  --neon-orange: #ff8800;
+  --neon-red:    #ff2255;
+  --neon-yellow: #ffee22;
+  --text:        #c8d8f0;
+  --muted:       #3a4a6a;
+  --muted-hi:    #6a80a8;
+  /* Legacy aliases */
+  --mc-dark:   var(--bg);
+  --mc-panel:  var(--panel);
+  --mc-border: var(--border);
+  --mc-accent: var(--neon-green);
+  --mc-green:  #00cc80;
+  --mc-red:    var(--neon-red);
+  --mc-yellow: var(--neon-yellow);
+  --mc-blue:   var(--neon-cyan);
+  --mc-text:   var(--text);
+  --mc-muted:  var(--muted-hi);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  user-select: none;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted-hi); }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.btn {
+  @apply px-3 py-1.5 rounded text-sm font-mono cursor-pointer border transition-all duration-150;
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+}
+.btn:hover {
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 8px rgba(0,200,255,.15);
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; }
+
+.btn-primary {
+  background: rgba(0,255,157,.08);
+  border-color: var(--neon-green);
+  color: var(--neon-green);
+}
+.btn-primary:hover {
+  background: rgba(0,255,157,.18);
+  box-shadow: 0 0 12px rgba(0,255,157,.3);
+  color: var(--neon-green);
+  border-color: var(--neon-green);
+}
+
+.btn-danger {
+  background: rgba(255,34,85,.08);
+  border-color: var(--neon-red);
+  color: var(--neon-red);
+}
+.btn-danger:hover {
+  background: rgba(255,34,85,.18);
+  box-shadow: 0 0 12px rgba(255,34,85,.3);
+  color: var(--neon-red);
+}
+
+.btn-warning {
+  background: rgba(255,136,0,.08);
+  border-color: var(--neon-orange);
+  color: var(--neon-orange);
+}
+.btn-warning:hover {
+  background: rgba(255,136,0,.18);
+  box-shadow: 0 0 12px rgba(255,136,0,.3);
+  color: var(--neon-orange);
+}
+
+.input {
+  @apply w-full px-2 py-1.5 rounded text-sm font-mono outline-none transition-all;
+  background: rgba(0,0,0,.5);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.input:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 8px rgba(0,200,255,.15);
+}
+
+.progress-bar {
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(255,255,255,.05);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.status-online    { color: var(--neon-green); }
+.status-offline   { color: var(--muted-hi); }
+.status-connecting { color: var(--neon-yellow); }
+
+.chat-user     { color: var(--neon-cyan); }
+.chat-player   { color: var(--text); }
+.chat-bot      { color: var(--neon-green); }
+.chat-ai       { color: var(--neon-purple); }
+.chat-system   { color: var(--muted-hi); font-style: italic; }
+.chat-server   { color: #8090b0; }
+.chat-survivor { color: var(--neon-orange); }
+
+.mc-slot {
+  width: 44px; height: 44px;
+  background: rgba(0,0,0,.5);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; font-size: 10px; cursor: pointer;
+  transition: border-color .12s, box-shadow .12s;
+}
+.mc-slot:hover { border-color: var(--neon-cyan); }
+.mc-slot.active {
+  border-color: var(--neon-green);
+  box-shadow: 0 0 8px rgba(0,255,157,.3);
+  background: rgba(0,255,157,.05);
+}
+
+.tab-active {
+  border-bottom: 2px solid var(--neon-green);
+  color: var(--neon-green);
+}
+
+@keyframes pulse-neon {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .55; }
+}
+.pulse { animation: pulse-neon 1.4s ease-in-out infinite; }
+
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+
+/* ── Animated Stars ───────────────────────────────────────────────────── */
+@keyframes star-drift {
+  0%   { transform: translateY(0px);   opacity: var(--s-op, .6); }
+  50%  { opacity: 1; }
+  100% { transform: translateY(-4px);  opacity: var(--s-op, .6); }
+}
+@keyframes star-twinkle {
+  0%,100% { opacity: var(--s-op,.4); transform: scale(1); }
+  50%     { opacity: 1;              transform: scale(1.4); }
+}
+.star {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: #fff;
+  animation: star-twinkle var(--s-dur, 3s) ease-in-out infinite var(--s-delay, 0s);
+}
+@keyframes nebula-pulse {
+  0%,100% { opacity:.03; transform:scale(1); }
+  50%     { opacity:.07; transform:scale(1.08); }
+}
+.nebula {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(60px);
+  animation: nebula-pulse 8s ease-in-out infinite;
+}
+
+/* ── Welcome modal ────────────────────────────────────────────────────── */
+@keyframes welcome-in {
+  from { opacity:0; transform:translateY(24px) scale(.95); }
+  to   { opacity:1; transform:translateY(0)    scale(1);   }
+}
+.welcome-in { animation: welcome-in .45s cubic-bezier(.22,.61,.36,1) forwards; }
