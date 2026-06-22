@@ -377,7 +377,7 @@ class BotManager {
       // Анти-чит: НЕЛЬЗЯ есть во время движения.
       // Обход: сначала стоп, потом задержка 200-400ms (human reaction), потом consume.
       _eatCooldown++;
-      if (_eatCooldown >= 100 && !_isEating && bot.entity && bot.food != null && bot.food < 16) {
+      if (_eatCooldown >= 100 && !_isEating && !instance._pvpController?.isRunning() && bot.entity && bot.food != null && bot.food < 16) {
         _eatCooldown = 0;
         const foodItem = bot.inventory.items()
           .filter(i => i.foodPoints && i.foodPoints > 0)
@@ -1407,24 +1407,47 @@ class BotManager {
         await bot.clickWindow(slot, button ?? 0, 0);
         log.info(`[BotManager] clickWindow slot=${slot} button=${button} (container)`);
       } else {
-        // Главный инвентарь (без открытого контейнера).
-        // Mineflayer clickWindow требует currentWindow, поэтому
-        // временно устанавливаем inventory.window как текущее окно.
-        const invWin = bot.inventory?.window || bot.inventory;
-        if (invWin) {
-          const savedWindow = bot.currentWindow;
-          bot.currentWindow = invWin;
+        // Главный инвентарь — прямой window_click пакет (WindowId=0).
+        // bot.clickWindow() требует currentWindow, которого нет без открытого контейнера.
+        // Отправляем пакет напрямую через bot._client для надёжности.
+        const sentDirect = (() => {
           try {
-            await bot.clickWindow(slot, button ?? 0, 0);
-            log.info(`[BotManager] clickWindow slot=${slot} button=${button} (inventory)`);
-          } finally {
-            bot.currentWindow = savedWindow;
-          }
-        } else {
-          // Крайний случай: hotbar — меняем активный слот
-          if (slot >= 36 && slot <= 44) {
+            const mc = require('minecraft-data')(bot.version);
+            const newer = parseFloat(bot.version) >= 1.17;
+            if (newer) {
+              bot._client.write('window_click', {
+                windowId: 0,
+                stateId: bot._stateId || 0,
+                slot: slot,
+                mouseButton: button ?? 0,
+                mode: 0,
+                changedSlots: [],
+                cursorItem: { present: false },
+              });
+            } else {
+              bot._client.write('window_click', {
+                windowId: 0,
+                slot: slot,
+                mouseButton: button ?? 0,
+                mode: 0,
+                action: (bot._invActionNum = ((bot._invActionNum || 0) + 1)),
+                item: null,
+              });
+            }
+            log.info(`[BotManager] direct window_click slot=${slot} button=${button ?? 0}`);
+            return true;
+          } catch { return false; }
+        })();
+        // Фоллбэк через временный currentWindow
+        if (!sentDirect) {
+          const invWin = bot.inventory?.window || bot.inventory;
+          if (invWin) {
+            const savedWin = bot.currentWindow;
+            bot.currentWindow = invWin;
+            try { await bot.clickWindow(slot, button ?? 0, 0); } catch {}
+            finally { bot.currentWindow = savedWin; }
+          } else if (slot >= 36 && slot <= 44) {
             await bot.setQuickBarSlot(slot - 36);
-            log.info(`[BotManager] setQuickBarSlot ${slot - 36}`);
           }
         }
       }
