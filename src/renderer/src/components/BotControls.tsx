@@ -41,6 +41,15 @@ export default function BotControls({ bot }: Props) {
     }
   }
 
+  async function handlePvp() {
+    const pvpMode = (bot as any).pvpMode;
+    if (pvpMode) {
+      await handle("pvp", () => (window as any).electronAPI.bot.stopPvp(bot.id));
+    } else {
+      await handle("pvp", () => (window as any).electronAPI.bot.startPvp(bot.id, { autoTarget: true }));
+    }
+  }
+
   async function handleToggleAI() {
     await handle("ai", () => window.electronAPI.bot.toggleAI(bot.id, !bot.config.aiEnabled));
   }
@@ -52,13 +61,15 @@ export default function BotControls({ bot }: Props) {
 
   const isConnected = bot.status === "online";
   const isConnecting = bot.status === "connecting";
+  const pvpMode = (bot as any).pvpMode ?? false;
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="panel p-3">
+      <div className="panel p-3" style={{ background: "rgba(13,17,23,0.80)", backdropFilter: "blur(4px)" }}>
         <div className="text-xs font-mono mb-2" style={{ color: "#7ecc49" }}>🎮 Управление</div>
 
         <div className="flex flex-col gap-2">
+          {/* Connect / Disconnect */}
           <div className="flex gap-1.5 flex-wrap">
             <button
               className={`btn text-xs ${isConnected ? "btn-danger" : "btn-primary"}`}
@@ -81,6 +92,7 @@ export default function BotControls({ bot }: Props) {
             </button>
           </div>
 
+          {/* Stop buttons */}
           <div className="flex gap-1.5 flex-wrap">
             <button
               className="btn text-xs btn-warning"
@@ -89,7 +101,6 @@ export default function BotControls({ bot }: Props) {
             >
               ⛔ Стоп действие
             </button>
-
             <button
               className="btn text-xs"
               onClick={() => handle("stopMove", () => window.electronAPI.bot.stopMovement(bot.id))}
@@ -99,17 +110,33 @@ export default function BotControls({ bot }: Props) {
             </button>
           </div>
 
-          <button
-            className="btn text-xs w-full"
-            onClick={handleSurvivor}
-            disabled={!isConnected || !bot.config.aiEnabled || loading === "survivor"}
-            style={bot.survivorMode
-              ? { borderColor: "#e74c3c", color: "#e74c3c" }
-              : { background: "#5b3000", borderColor: "#e67e22", color: "#e67e22" }}
-          >
-            {loading === "survivor" ? "⏳..." : bot.survivorMode ? "⏹ Остановить ВЫЖИВАЛЬЩИКА" : "⚔️ ВЫЖИВАЛЬЩИК"}
-          </button>
+          {/* Survivor + PvP (side by side) */}
+          <div className="flex gap-1.5">
+            <button
+              className="btn text-xs flex-1"
+              onClick={handleSurvivor}
+              disabled={!isConnected || !bot.config.aiEnabled || loading === "survivor"}
+              style={bot.survivorMode
+                ? { borderColor: "#e74c3c", color: "#e74c3c", background: "#2a0a0a" }
+                : { background: "#1e1400", borderColor: "#e67e22", color: "#e67e22" }}
+            >
+              {loading === "survivor" ? "⏳..." : bot.survivorMode ? "⏹ Выжив." : "⚔️ Выживальщик"}
+            </button>
 
+            <button
+              className="btn text-xs flex-1"
+              onClick={handlePvp}
+              disabled={!isConnected || loading === "pvp"}
+              title="Автоматически атакует всех игроков поблизости (кроме тимейтов)"
+              style={pvpMode
+                ? { borderColor: "#e74c3c", color: "#e74c3c", background: "#2a0a0a", animation: "pulse 1s infinite" }
+                : { background: "#1a0a1a", borderColor: "#9b59b6", color: "#9b59b6" }}
+            >
+              {loading === "pvp" ? "⏳..." : pvpMode ? "⏹ PvP: Вкл" : "💀 PvP-режим"}
+            </button>
+          </div>
+
+          {/* Nick change */}
           <div className="flex gap-1">
             {showNickInput ? (
               <>
@@ -131,14 +158,15 @@ export default function BotControls({ bot }: Props) {
             )}
           </div>
 
+          {/* Delete */}
           <button className="btn btn-danger text-xs" onClick={handleDelete}>
             🗑️ Удалить бота
           </button>
         </div>
       </div>
 
-      {/* Anka Recorder Panel */}
-      <div className="panel" style={{ overflow: "hidden" }}>
+      {/* Anka Recorder */}
+      <div className="panel" style={{ overflow: "hidden", background: "rgba(13,17,23,0.80)", backdropFilter: "blur(4px)" }}>
         <button
           className="w-full text-left px-3 py-2 flex items-center justify-between"
           style={{ background: "none", border: "none", cursor: "pointer" }}
@@ -152,7 +180,6 @@ export default function BotControls({ bot }: Props) {
           </div>
           <span style={{ color: "#555", fontSize: 10 }}>{showAnka ? "▲" : "▼"}</span>
         </button>
-
         {showAnka && (
           <div style={{ borderTop: "1px solid #2a2a2a" }}>
             <AnkaRecorder bot={bot} />

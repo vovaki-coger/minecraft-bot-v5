@@ -112,7 +112,12 @@ function setupIpcHandlers() {
 
   // ── PvP ──────────────────────────────────────────────────────────────────
   ipcMain.handle("bot:startPvp", (_e, botId, opts) => botManager.startPvpTask(botId, opts));
-  ipcMain.handle("bot:stopPvp", (_e, botId) => botManager.stopAction(botId));
+  ipcMain.handle("bot:stopPvp", (_e, botId) => botManager.stopPvpMode(botId));
+  ipcMain.handle("bot:togglePvpMode", (_e, botId) => botManager.togglePvpMode(botId));
+
+  // ── Inventory click ───────────────────────────────────────────────────────
+  ipcMain.handle("bot:clickItem", (_e, botId, slot, button) => botManager.clickInventorySlot(botId, slot, button));
+  ipcMain.handle("bot:closeWindow", (_e, botId) => botManager.closeBotWindow(botId));
 
   // ── Proxy ────────────────────────────────────────────────────────────────
   ipcMain.handle("proxy:check", (_e, proxy) => botManager.testProxy(proxy));

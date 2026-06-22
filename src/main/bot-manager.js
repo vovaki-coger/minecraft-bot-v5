@@ -1242,6 +1242,112 @@ class BotManager {
     return instance.taskManager.runTask('pvp_player', opts);
   }
 
+  // ── PvP автоатака (непрерывный режим) ──────────────────────────────────
+  togglePvpMode(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance?.bot) throw new Error('Бот не подключён');
+    if (instance._pvpLoopRunning) {
+      return this.stopPvpMode(botId);
+    }
+    this._startPvpLoop(botId);
+    return { pvpMode: true };
+  }
+
+  stopPvpMode(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance) return { pvpMode: false };
+    instance._pvpLoopRunning = false;
+    if (instance._pvpLoopTimer) { clearTimeout(instance._pvpLoopTimer); instance._pvpLoopTimer = null; }
+    try { if (instance.bot?.pvp) instance.bot.pvp.stop(); } catch {}
+    try { if (instance.taskManager) instance.taskManager._running = false; } catch {}
+    this.emit('bot:pvpToggled', { botId, pvpMode: false });
+    return { pvpMode: false };
+  }
+
+  _startPvpLoop(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance?.bot) return;
+    instance._pvpLoopRunning = true;
+    this.emit('bot:pvpToggled', { botId, pvpMode: true });
+
+    const loop = async () => {
+      if (!instance._pvpLoopRunning || !instance.bot) return;
+      try {
+        const bot = instance.bot;
+        const teammates = instance.config?.teammates || [];
+        const myPos = bot.entity?.position;
+        if (!myPos) { instance._pvpLoopTimer = setTimeout(loop, 1500); return; }
+
+        // Find nearest player
+        const target = Object.values(bot.entities || {})
+          .filter(e =>
+            e.type === 'player' &&
+            e.username !== bot.username &&
+            e.isValid !== false &&
+            !teammates.includes(e.username) &&
+            e.position.distanceTo(myPos) < 60
+          )
+          .sort((a, b) => a.position.distanceTo(myPos) - b.position.distanceTo(myPos))[0];
+
+        if (target) {
+          const dist = target.position.distanceTo(myPos);
+          if (dist > 3.5) {
+            // Move closer using pathfinder
+            const { goals } = require('mineflayer-pathfinder');
+            bot.pathfinder?.goto(new goals.GoalFollow(target, 2)).catch(() => {});
+            instance._pvpLoopTimer = setTimeout(loop, 500);
+            return;
+          }
+          // Look at target
+          const headPos = target.position.offset(0, (target.height ?? 1.8) * 0.85, 0);
+          await bot.lookAt(headPos, true).catch(() => {});
+          // Jump-crit 60%
+          if (Math.random() < 0.6 && !bot.entity?.isInWater) {
+            bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 50));
+            bot.setControlState('jump', false);
+            await new Promise(r => setTimeout(r, 150));
+          }
+          if (target.isValid !== false) bot.attack(target);
+        }
+      } catch (err) { /* ignore */ }
+
+      if (instance._pvpLoopRunning) {
+        const delay = 420 + Math.floor(Math.random() * 230);
+        instance._pvpLoopTimer = setTimeout(loop, delay);
+      }
+    };
+    loop();
+  }
+
+  // ── Клик по слоту инвентаря ─────────────────────────────────────────────
+  async clickInventorySlot(botId, slot, button) {
+    const instance = this.bots.get(botId);
+    if (!instance?.bot) throw new Error('Бот не подключён');
+    const bot = instance.bot;
+    try {
+      if (bot.currentWindow) {
+        await bot.clickWindow(slot, button ?? 0, 0);
+      } else {
+        // No window open — click inventory directly
+        await bot.clickWindow(slot, button ?? 0, 0);
+      }
+    } catch (err) {
+      // clickWindow may fail if no window — try activateItem
+      if (button === 1) bot.activateItem?.();
+    }
+    return { success: true };
+  }
+
+  // ── Закрыть текущее окно ──────────────────────────────────────────────────
+  closeBotWindow(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance?.bot) return;
+    try { instance.bot.closeWindow(instance.bot.currentWindow); } catch {}
+    this.emit('bot:chestClosed', { botId });
+    return { success: true };
+  }
+
 }
 
 module.exports = { BotManager };

@@ -48,6 +48,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // ── PvP ────────────────────────────────────────────────────────
     startPvp: (id, opts) => ipcRenderer.invoke("bot:startPvp", id, opts),
     stopPvp: (id) => ipcRenderer.invoke("bot:stopPvp", id),
+    togglePvpMode: (id) => ipcRenderer.invoke("bot:togglePvpMode", id),
+    // ── Inventory interaction ───────────────────────────────────────
+    clickItem: (id, slot, button) => ipcRenderer.invoke("bot:clickItem", id, slot, button),
+    closeWindow: (id) => ipcRenderer.invoke("bot:closeWindow", id),
   },
   anka: {
     list: () => ipcRenderer.invoke("anka:list"),
@@ -72,7 +76,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       "bot:aiToggled", "bot:windowOpen", "bot:windowClose", "bot:modelDetected",
       "bot:anarchyStarted", "bot:anarchyStopped", "bot:anarchyPhase", "bot:anarchyLog",
       "bot:farmStarted", "bot:farmStopped", "bot:farmLog",
-      "bot:pvpStarted", "bot:pvpStopped",
+      "bot:pvpStarted", "bot:pvpStopped", "bot:pvpToggled",
+      "bot:chestOpened", "bot:chestClosed",
       "ollama:pullProgress",
       "coordinator:statusUpdate", "coordinator:taskAssigned", "coordinator:groupChat",
     ];

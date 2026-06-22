@@ -5,7 +5,10 @@ export interface BotStats {
   x: number; y: number; z: number; biome: string;
   inventory: InventoryItem[]; hotbarSlot: number;
 }
-export interface InventoryItem { name: string; count: number; slot: number; displayName: string; }
+export interface InventoryItem {
+  name: string; count: number; slot: number; displayName: string;
+  durabilityUsed?: number; maxDurability?: number;
+}
 export interface ChatMessage {
   type: "user" | "player" | "bot" | "ai" | "system" | "server" | "survivor";
   text: string; timestamp: number;
@@ -18,12 +21,14 @@ export interface BotState {
     systemPrompt: string; proxy: string; autoLogin: boolean;
     autoRegister: boolean; apiKey?: string; apiProvider?: string;
     lobbyConfig?: { enabled: boolean; mode: string; rankSlot: number; rankName: string; npcMode: boolean; rankWindowTitle: string; };
+    teammates?: string[];
   };
   status: "offline" | "connecting" | "online";
   stats: BotStats;
   chatHistory: ChatMessage[];
   aiChatHistory: ChatMessage[];
   survivorMode: boolean;
+  pvpMode: boolean;
 }
 export interface OllamaStatus { installed: boolean; running: boolean; models: any[]; }
 export interface ModelInfo { name: string; displayName: string; size: string; vram: string; description: string; installed: boolean; tag?: string; isLocal?: boolean; }
@@ -66,6 +71,7 @@ interface AppState {
   onAiToggled: (d: { botId: string; aiEnabled: boolean }) => void;
   onPullProgress: (d: PullProgress) => void;
   onGroupChat: (d: { botId: string; message: string }) => void;
+  onPvpToggled: (d: { botId: string; pvpMode: boolean }) => void;
 }
 
 function updateBot(bots: BotState[], botId: string, updater: (b: BotState) => BotState): BotState[] {
@@ -91,7 +97,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadBots: async () => {
     const bots = await window.electronAPI.bot.getAll();
-    const botsWithAI = bots.map((b: any) => ({ ...b, aiChatHistory: b.aiChatHistory || [] }));
+    const botsWithAI = bots.map((b: any) => ({ ...b, aiChatHistory: b.aiChatHistory || [], pvpMode: b.pvpMode || false }));
     set({ bots: botsWithAI });
     if (botsWithAI.length > 0 && !get().selectedBotId) set({ selectedBotId: botsWithAI[0].id });
   },
@@ -103,7 +109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   onBotCreated: (d) => set((s) => ({
-    bots: [...s.bots, { ...d, aiChatHistory: [] }],
+    bots: [...s.bots, { ...d, aiChatHistory: [], pvpMode: false }],
     selectedBotId: s.selectedBotId || d.id,
   })),
 
@@ -161,4 +167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const newMsg: ChatMessage = { type: "bot", text: `[Bot:${botId.slice(0, 6)}]: ${message}`, timestamp: Date.now() };
     set((s) => ({ groupChat: [...s.groupChat, newMsg].slice(-200) }));
   },
+
+  onPvpToggled: ({ botId, pvpMode }) =>
+    set((s) => ({ bots: updateBot(s.bots, botId, (b) => ({ ...b, pvpMode })) })),
 }));

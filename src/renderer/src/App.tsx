@@ -43,6 +43,7 @@ export default function App() {
       window.electronAPI.on("bot:survivorStarted", (d) => useAppStore.getState().onSurvivorStarted(d)),
       window.electronAPI.on("bot:survivorStopped", (d) => useAppStore.getState().onSurvivorStopped(d)),
       window.electronAPI.on("bot:aiToggled",       (d) => useAppStore.getState().onAiToggled(d)),
+      window.electronAPI.on("bot:pvpToggled",      (d) => useAppStore.getState().onPvpToggled(d)),
       window.electronAPI.on("ollama:pullProgress", (d) => useAppStore.getState().onPullProgress(d)),
       window.electronAPI.on("coordinator:groupChat",(d) => useAppStore.getState().onGroupChat(d)),
     ];
