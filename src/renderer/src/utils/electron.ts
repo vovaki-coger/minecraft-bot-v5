@@ -24,6 +24,7 @@ declare global {
         disconnect: (id: string) => Promise<any>;
         delete: (id: string) => Promise<any>;
         sendChat: (id: string, msg: string) => Promise<void>;
+        sendAIOnly: (id: string, msg: string) => Promise<void>;
         stopAction: (id: string) => Promise<any>;
         stopMovement: (id: string) => Promise<any>;
         startSurvivor: (id: string) => Promise<any>;
@@ -33,6 +34,17 @@ declare global {
         getAll: () => Promise<any[]>;
         updateConfig: (id: string, config: any) => Promise<any>;
         testProxy: (proxy: string) => Promise<{ success: boolean; ip?: string; error?: string }>;
+        triggerLobby: (id: string) => Promise<any>;
+        startPvp: (id: string, opts?: any) => Promise<any>;
+        stopPvp: (id: string) => Promise<any>;
+        togglePvpMode: (id: string) => Promise<any>;
+        clickItem: (id: string, slot: number, button?: number) => Promise<{ success: boolean }>;
+        closeWindow: (id: string) => Promise<any>;
+        startAnarchy: (id: string, opts?: any) => Promise<any>;
+        stopAnarchy: (id: string) => Promise<any>;
+        getAnarchyState: (id: string) => Promise<any>;
+        startFarm: (id: string, opts?: any) => Promise<any>;
+        stopFarm: (id: string) => Promise<any>;
       };
       proxy: {
         check: (proxy: string) => Promise<{ success: boolean; ip?: string; error?: string }>;
@@ -42,6 +54,17 @@ declare global {
       };
       shell: {
         openExternal: (url: string) => Promise<void>;
+      };
+      anka: {
+        list: () => Promise<any[]>;
+        startRecording: (botId: string) => Promise<any>;
+        addStep: (botId: string, step: any) => Promise<any>;
+        stopRecording: (botId: string, info: any) => Promise<any>;
+        cancelRecording: (botId: string) => Promise<any>;
+        getStepCount: (botId: string) => Promise<number>;
+        delete: (id: string) => Promise<any>;
+        play: (botId: string, profileId: string) => Promise<any>;
+        clickSlot: (botId: string, slot: number, button?: number) => Promise<any>;
       };
       on: (channel: string, cb: (data: any) => void) => () => void;
     };
