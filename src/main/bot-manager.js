@@ -1401,62 +1401,38 @@ class BotManager {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error('Бот не подключён');
     const bot = instance.bot;
+    const btn = button ?? 0; // 0 = LMB, 1 = RMB
+
     try {
       if (bot.currentWindow) {
-        // Контейнер/сундук открыт — кликаем через стандартный API
-        await bot.clickWindow(slot, button ?? 0, 0);
-        log.info(`[BotManager] clickWindow slot=${slot} button=${button} (container)`);
+        // Контейнер открыт — стандартный clickWindow
+        await bot.clickWindow(slot, btn, 0);
+        log.info(`[BotManager] clickWindow slot=${slot} btn=${btn} (container)`);
+        return { success: true };
+      }
+
+      // ── Главный инвентарь (нет открытого окна) ─────────────────────────────
+      // Метод: equip item → activate. Надёжнее raw пакета.
+      const item = bot.inventory.slots[slot];
+      if (!item) {
+        // Слот пустой — пробуем всё равно написать пакет напрямую
+        log.info(`[BotManager] slot ${slot} empty`);
+        return { success: true };
+      }
+
+      if (btn === 1) {
+        // ПКМ: взять в руку и использовать (съесть/выпить/активировать)
+        try { await bot.equip(item, 'hand'); } catch {}
+        await new Promise(r => setTimeout(r, 80));
+        try { bot.activateItem(); } catch {}
+        log.info(`[BotManager] PKM activateItem ${item.name} slot=${slot}`);
       } else {
-        // Главный инвентарь — прямой window_click пакет (WindowId=0).
-        // bot.clickWindow() требует currentWindow, которого нет без открытого контейнера.
-        // Отправляем пакет напрямую через bot._client для надёжности.
-        const sentDirect = (() => {
-          try {
-            const mc = require('minecraft-data')(bot.version);
-            const newer = parseFloat(bot.version) >= 1.17;
-            if (newer) {
-              bot._client.write('window_click', {
-                windowId: 0,
-                stateId: bot._stateId || 0,
-                slot: slot,
-                mouseButton: button ?? 0,
-                mode: 0,
-                changedSlots: [],
-                cursorItem: { present: false },
-              });
-            } else {
-              bot._client.write('window_click', {
-                windowId: 0,
-                slot: slot,
-                mouseButton: button ?? 0,
-                mode: 0,
-                action: (bot._invActionNum = ((bot._invActionNum || 0) + 1)),
-                item: null,
-              });
-            }
-            log.info(`[BotManager] direct window_click slot=${slot} button=${button ?? 0}`);
-            return true;
-          } catch { return false; }
-        })();
-        // Фоллбэк через временный currentWindow
-        if (!sentDirect) {
-          const invWin = bot.inventory?.window || bot.inventory;
-          if (invWin) {
-            const savedWin = bot.currentWindow;
-            bot.currentWindow = invWin;
-            try { await bot.clickWindow(slot, button ?? 0, 0); } catch {}
-            finally { bot.currentWindow = savedWin; }
-          } else if (slot >= 36 && slot <= 44) {
-            await bot.setQuickBarSlot(slot - 36);
-          }
-        }
+        // ЛКМ: взять в руку
+        try { await bot.equip(item, 'hand'); } catch {}
+        log.info(`[BotManager] LKM equip ${item.name} slot=${slot}`);
       }
     } catch (err) {
       log.warn(`[BotManager] clickInventorySlot error slot=${slot}: ${err.message}`);
-      // Запасной вариант для hotbar
-      if (slot >= 36 && slot <= 44) {
-        try { await bot.setQuickBarSlot(slot - 36); } catch {}
-      }
     }
     return { success: true };
   }
