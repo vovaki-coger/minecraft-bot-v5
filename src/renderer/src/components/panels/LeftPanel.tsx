@@ -5,6 +5,7 @@ import ModelsTab from "../tabs/ModelsTab";
 import SettingsTab from "../tabs/SettingsTab";
 import CoordinatorTab from "../tabs/CoordinatorTab";
 import AnarchyTab from "../tabs/AnarchyTab";
+import FarmTab from "../tabs/FarmTab";
 import BotEditModal from "../BotEditModal";
 
 export default function LeftPanel() {
@@ -18,10 +19,12 @@ export default function LeftPanel() {
       case "settings":    return <SettingsTab />;
       case "coordinator": return <CoordinatorTab />;
       case "anarchy":     return <AnarchyTab />;
+      case "farm":        return <FarmTab bot={selectedBot} />;
       default:
         return (
           <div className="flex flex-col h-full overflow-hidden">
-            <div className="px-3 py-2 border-b text-xs font-mono" style={{ borderColor: "#3a3a3a", color: "#7ecc49" }}>
+            <div className="px-3 py-2 border-b text-xs font-mono"
+              style={{ borderColor: "#3a3a3a", color: "#7ecc49" }}>
               Управление ботом
             </div>
             <div className="flex-1 overflow-y-auto p-2">
@@ -68,7 +71,13 @@ export default function LeftPanel() {
     <>
       <div
         className="panel flex-shrink-0"
-        style={{ width: 290, overflow: "hidden", display: "flex", flexDirection: "column" }}
+        style={{
+          width: 290,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          background: "rgba(30,30,30,0.92)",
+        }}
       >
         {content()}
       </div>

@@ -1224,6 +1224,24 @@ class BotManager {
     }
     return { success: true };
   }
+  // ── Ферма ─────────────────────────────────────────────────────────────────
+  startFarmTask(botId, opts) {
+    const instance = this.bots.get(botId);
+    if (!instance?.taskManager) throw new Error('Бот не подключён или taskManager недоступен');
+    const taskName =
+      opts.type === 'crops' ? 'farm_crops' :
+      opts.type === 'quick' ? 'farm_quick' :
+      opts.type === 'trees' ? 'farm_trees_full' : 'farm_crops';
+    return instance.taskManager.runTask(taskName, opts);
+  }
+
+  // ── PvP ───────────────────────────────────────────────────────────────────
+  startPvpTask(botId, opts) {
+    const instance = this.bots.get(botId);
+    if (!instance?.taskManager) throw new Error('Бот не подключён');
+    return instance.taskManager.runTask('pvp_player', opts);
+  }
+
 }
 
 module.exports = { BotManager };

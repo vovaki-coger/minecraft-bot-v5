@@ -3,13 +3,20 @@ import { useAppStore } from "./store/appStore";
 import MainLayout from "./components/MainLayout";
 import OllamaSetup from "./components/OllamaSetup";
 import LoadingScreen from "./components/LoadingScreen";
+import WelcomeModal from "./components/WelcomeModal";
 
 export default function App() {
   const { ollamaStatus, setOllamaStatus, loadBots, loadConfig } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
 
   useEffect(() => {
+    // Показываем приветствие при первом запуске
+    if (!localStorage.getItem("prismarine_welcomed")) {
+      setShowWelcome(true);
+    }
+
     async function init() {
       await loadConfig();
       await loadBots();
@@ -21,29 +28,43 @@ export default function App() {
     init();
 
     const unsubs = [
-      window.electronAPI.on("bot:created", (d) => useAppStore.getState().onBotCreated(d)),
-      window.electronAPI.on("bot:deleted", (d) => useAppStore.getState().onBotDeleted(d)),
-      window.electronAPI.on("bot:statusChanged", (d) => useAppStore.getState().onBotStatusChanged(d)),
-      window.electronAPI.on("bot:statsUpdated", (d) => useAppStore.getState().onBotStatsUpdated(d)),
-      window.electronAPI.on("bot:chat", (d) => useAppStore.getState().onBotChat(d)),
-      window.electronAPI.on("bot:serverMessage", (d) => useAppStore.getState().onBotServerMessage(d)),
-      window.electronAPI.on("bot:aiMessage", (d) => useAppStore.getState().onBotAiMessage(d)),
-      window.electronAPI.on("bot:aiChatMessage", (d) => useAppStore.getState().onBotAiChatMessage(d)),
-      window.electronAPI.on("bot:death", (d) => useAppStore.getState().onBotDeath(d)),
-      window.electronAPI.on("bot:error", (d) => useAppStore.getState().onBotError(d)),
-      window.electronAPI.on("bot:inventoryUpdated", (d) => useAppStore.getState().onInventoryUpdated(d)),
-      window.electronAPI.on("bot:survivorLog", (d) => useAppStore.getState().onSurvivorLog(d)),
+      window.electronAPI.on("bot:created",        (d) => useAppStore.getState().onBotCreated(d)),
+      window.electronAPI.on("bot:deleted",         (d) => useAppStore.getState().onBotDeleted(d)),
+      window.electronAPI.on("bot:statusChanged",   (d) => useAppStore.getState().onBotStatusChanged(d)),
+      window.electronAPI.on("bot:statsUpdated",    (d) => useAppStore.getState().onBotStatsUpdated(d)),
+      window.electronAPI.on("bot:chat",            (d) => useAppStore.getState().onBotChat(d)),
+      window.electronAPI.on("bot:serverMessage",   (d) => useAppStore.getState().onBotServerMessage(d)),
+      window.electronAPI.on("bot:aiMessage",       (d) => useAppStore.getState().onBotAiMessage(d)),
+      window.electronAPI.on("bot:aiChatMessage",   (d) => useAppStore.getState().onBotAiChatMessage(d)),
+      window.electronAPI.on("bot:death",           (d) => useAppStore.getState().onBotDeath(d)),
+      window.electronAPI.on("bot:error",           (d) => useAppStore.getState().onBotError(d)),
+      window.electronAPI.on("bot:inventoryUpdated",(d) => useAppStore.getState().onInventoryUpdated(d)),
+      window.electronAPI.on("bot:survivorLog",     (d) => useAppStore.getState().onSurvivorLog(d)),
       window.electronAPI.on("bot:survivorStarted", (d) => useAppStore.getState().onSurvivorStarted(d)),
       window.electronAPI.on("bot:survivorStopped", (d) => useAppStore.getState().onSurvivorStopped(d)),
-      window.electronAPI.on("bot:aiToggled", (d) => useAppStore.getState().onAiToggled(d)),
+      window.electronAPI.on("bot:aiToggled",       (d) => useAppStore.getState().onAiToggled(d)),
       window.electronAPI.on("ollama:pullProgress", (d) => useAppStore.getState().onPullProgress(d)),
-      window.electronAPI.on("coordinator:groupChat", (d) => useAppStore.getState().onGroupChat(d)),
+      window.electronAPI.on("coordinator:groupChat",(d) => useAppStore.getState().onGroupChat(d)),
     ];
 
     return () => unsubs.forEach((u) => u?.());
   }, []);
 
+  function handleWelcomeClose(lang: "ru" | "en") {
+    localStorage.setItem("prismarine_welcomed", "1");
+    localStorage.setItem("prismarine_lang", lang);
+    setShowWelcome(false);
+  }
+
   if (loading) return <LoadingScreen />;
-  if (needsSetup && !ollamaStatus?.running) return <OllamaSetup onComplete={() => setNeedsSetup(false)} />;
-  return <MainLayout />;
+
+  return (
+    <>
+      {showWelcome && <WelcomeModal onClose={handleWelcomeClose} />}
+      {!showWelcome && needsSetup && !ollamaStatus?.running
+        ? <OllamaSetup onComplete={() => setNeedsSetup(false)} />
+        : !showWelcome && <MainLayout />
+      }
+    </>
+  );
 }

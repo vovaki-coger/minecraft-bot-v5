@@ -39,7 +39,7 @@ interface AppState {
   pullProgresses: Record<string, PullProgress["progress"]>;
   globalPassword: string; globalProxy: string;
   groupChat: ChatMessage[];
-  activeTab: "bots" | "models" | "settings" | "coordinator" | "anarchy";
+  activeTab: "bots" | "models" | "settings" | "coordinator" | "anarchy" | "farm";
 
   setOllamaStatus: (s: OllamaStatus) => void;
   setModels: (m: ModelInfo[]) => void;

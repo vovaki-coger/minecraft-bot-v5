@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     startAnarchy: (id, opts) => ipcRenderer.invoke("bot:startAnarchy", id, opts),
     stopAnarchy: (id) => ipcRenderer.invoke("bot:stopAnarchy", id),
     getAnarchyState: (id) => ipcRenderer.invoke("bot:getAnarchyState", id),
+    // ── Ферма ──────────────────────────────────────────────────────
+    startFarm: (id, opts) => ipcRenderer.invoke("bot:startFarm", id, opts),
+    stopFarm: (id) => ipcRenderer.invoke("bot:stopFarm", id),
+    // ── PvP ────────────────────────────────────────────────────────
+    startPvp: (id, opts) => ipcRenderer.invoke("bot:startPvp", id, opts),
+    stopPvp: (id) => ipcRenderer.invoke("bot:stopPvp", id),
   },
   anka: {
     list: () => ipcRenderer.invoke("anka:list"),
@@ -54,15 +60,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     play: (botId, profileId) => ipcRenderer.invoke("anka:play", botId, profileId),
     clickSlot: (botId, slot, button) => ipcRenderer.invoke("anka:clickSlot", botId, slot, button),
   },
-  proxy: {
-    check: (proxy) => ipcRenderer.invoke("proxy:check", proxy),
-  },
-  dialog: {
-    openFile: () => ipcRenderer.invoke("dialog:openFile"),
-  },
-  shell: {
-    openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
-  },
+  proxy: { check: (proxy) => ipcRenderer.invoke("proxy:check", proxy) },
+  dialog: { openFile: () => ipcRenderer.invoke("dialog:openFile") },
+  shell: { openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url) },
   on: (channel, cb) => {
     const allowedChannels = [
       "bot:created", "bot:deleted", "bot:statusChanged", "bot:statsUpdated",
@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       "bot:survivorStarted", "bot:survivorStopped", "bot:survivorLog",
       "bot:aiToggled", "bot:windowOpen", "bot:windowClose", "bot:modelDetected",
       "bot:anarchyStarted", "bot:anarchyStopped", "bot:anarchyPhase", "bot:anarchyLog",
+      "bot:farmStarted", "bot:farmStopped", "bot:farmLog",
+      "bot:pvpStarted", "bot:pvpStopped",
       "ollama:pullProgress",
       "coordinator:statusUpdate", "coordinator:taskAssigned", "coordinator:groupChat",
     ];

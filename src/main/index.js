@@ -25,9 +25,9 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 700,
-    backgroundColor: "#1A1A1A",
+    backgroundColor: "#0d1117",
     titleBarStyle: "default",
-    title: "Призмарин Бот v4.0",
+    title: "Призмарин Бот v5.0",
     icon: path.join(__dirname, "../../assets/icon.png"),
     webPreferences: {
       nodeIntegration: false,
@@ -44,9 +44,7 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, "../../dist/index.html"));
   }
 
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
+  mainWindow.on("closed", () => { mainWindow = null; });
 }
 
 async function initialize() {
@@ -65,76 +63,61 @@ async function initialize() {
 }
 
 function setupIpcHandlers() {
+  // ── Config ───────────────────────────────────────────────────────────────
   ipcMain.handle("config:get", () => configManager.getAll());
   ipcMain.handle("config:set", (_e, key, value) => configManager.set(key, value));
-  ipcMain.handle("config:setGlobalPassword", (_e, password) =>
-    configManager.setGlobalPassword(password)
-  );
-  ipcMain.handle("config:getGlobalPassword", () =>
-    configManager.getGlobalPassword()
-  );
+  ipcMain.handle("config:setGlobalPassword", (_e, pw) => configManager.setGlobalPassword(pw));
+  ipcMain.handle("config:getGlobalPassword", () => configManager.getGlobalPassword());
 
+  // ── Ollama ───────────────────────────────────────────────────────────────
   ipcMain.handle("ollama:check", () => ollamaManager.checkOllama());
   ipcMain.handle("ollama:install", () => ollamaManager.installOllama());
   ipcMain.handle("ollama:listModels", () => ollamaManager.listModels());
   ipcMain.handle("ollama:listInstalledModels", () => ollamaManager.listInstalledModels());
   ipcMain.handle("ollama:pullModel", (_e, modelName) =>
     ollamaManager.pullModel(modelName, (progress) => {
-      if (mainWindow)
-        mainWindow.webContents.send("ollama:pullProgress", { modelName, progress });
+      if (mainWindow) mainWindow.webContents.send("ollama:pullProgress", { modelName, progress });
     })
   );
-  ipcMain.handle("ollama:deleteModel", (_e, modelName) =>
-    ollamaManager.deleteModel(modelName)
-  );
+  ipcMain.handle("ollama:deleteModel", (_e, name) => ollamaManager.deleteModel(name));
   ipcMain.handle("ollama:chat", (_e, params) => ollamaManager.chat(params));
   ipcMain.handle("ollama:getRunningModels", () => ollamaManager.getRunningModels());
-  ipcMain.handle("ollama:loadCustomModel", (_e, filePath) =>
-    ollamaManager.loadCustomModel(filePath)
-  );
+  ipcMain.handle("ollama:loadCustomModel", (_e, filePath) => ollamaManager.loadCustomModel(filePath));
 
+  // ── Bot ──────────────────────────────────────────────────────────────────
   ipcMain.handle("bot:create", (_e, config) => botManager.createBot(config));
   ipcMain.handle("bot:connect", (_e, botId) => botManager.connectBot(botId));
   ipcMain.handle("bot:disconnect", (_e, botId) => botManager.disconnectBot(botId));
   ipcMain.handle("bot:delete", (_e, botId) => botManager.deleteBot(botId));
-  ipcMain.handle("bot:sendChat", (_e, botId, message) =>
-    botManager.sendChat(botId, message)
-  );
-  // v4: Отправить сообщение только в AI, не в Minecraft чат
-  ipcMain.handle("bot:sendAIOnly", (_e, botId, message) =>
-    botManager.sendAIOnly(botId, message)
-  );
+  ipcMain.handle("bot:sendChat", (_e, botId, message) => botManager.sendChat(botId, message));
+  ipcMain.handle("bot:sendAIOnly", (_e, botId, message) => botManager.sendAIOnly(botId, message));
   ipcMain.handle("bot:stopAction", (_e, botId) => botManager.stopAction(botId));
   ipcMain.handle("bot:stopMovement", (_e, botId) => botManager.stopMovement(botId));
-  ipcMain.handle("bot:startSurvivor", (_e, botId) =>
-    botManager.startSurvivorMode(botId)
-  );
+  ipcMain.handle("bot:startSurvivor", (_e, botId) => botManager.startSurvivorMode(botId));
   ipcMain.handle("bot:stopSurvivor", (_e, botId) => botManager.stopSurvivorMode(botId));
-  ipcMain.handle("bot:setNick", (_e, botId, nick) =>
-    botManager.setNick(botId, nick)
-  );
-  ipcMain.handle("bot:toggleAI", (_e, botId, enabled) =>
-    botManager.toggleAI(botId, enabled)
-  );
+  ipcMain.handle("bot:setNick", (_e, botId, nick) => botManager.setNick(botId, nick));
+  ipcMain.handle("bot:toggleAI", (_e, botId, enabled) => botManager.toggleAI(botId, enabled));
   ipcMain.handle("bot:getAll", () => botManager.getAllBots());
-  ipcMain.handle("bot:updateConfig", (_e, botId, config) =>
-    botManager.updateBotConfig(botId, config)
-  );
+  ipcMain.handle("bot:updateConfig", (_e, botId, config) => botManager.updateBotConfig(botId, config));
   ipcMain.handle("bot:testProxy", (_e, proxy) => botManager.testProxy(proxy));
   ipcMain.handle("bot:triggerLobby", (_e, botId) => botManager.triggerLobbyRank(botId));
 
+  ipcMain.handle("bot:startAnarchy", (_e, botId, opts) => botManager.startAnarchyProtocol(botId, opts));
+  ipcMain.handle("bot:stopAnarchy", (_e, botId) => botManager.stopAnarchyProtocol(botId));
+  ipcMain.handle("bot:getAnarchyState", (_e, botId) => botManager.getAnarchyState(botId));
+
+  // ── Farm ─────────────────────────────────────────────────────────────────
+  ipcMain.handle("bot:startFarm", (_e, botId, opts) => botManager.startFarmTask(botId, opts));
+  ipcMain.handle("bot:stopFarm", (_e, botId) => botManager.stopAction(botId));
+
+  // ── PvP ──────────────────────────────────────────────────────────────────
+  ipcMain.handle("bot:startPvp", (_e, botId, opts) => botManager.startPvpTask(botId, opts));
+  ipcMain.handle("bot:stopPvp", (_e, botId) => botManager.stopAction(botId));
+
+  // ── Proxy ────────────────────────────────────────────────────────────────
   ipcMain.handle("proxy:check", (_e, proxy) => botManager.testProxy(proxy));
 
-  ipcMain.handle("bot:startAnarchy", (_e, botId, opts) =>
-    botManager.startAnarchyProtocol(botId, opts)
-  );
-  ipcMain.handle("bot:stopAnarchy", (_e, botId) =>
-    botManager.stopAnarchyProtocol(botId)
-  );
-  ipcMain.handle("bot:getAnarchyState", (_e, botId) =>
-    botManager.getAnarchyState(botId)
-  );
-
+  // ── Dialog ───────────────────────────────────────────────────────────────
   ipcMain.handle("dialog:openFile", async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ["openFile"],
@@ -143,8 +126,7 @@ function setupIpcHandlers() {
     return result.filePaths[0] || null;
   });
 
-
-  // ── Рекордер анки ─────────────────────────────────────────────────────────
+  // ── Anka Recorder ────────────────────────────────────────────────────────
   ipcMain.handle("anka:list", () => ankaRecorder.listProfiles());
   ipcMain.handle("anka:startRecording", (_e, botId) => ankaRecorder.startRecording(botId));
   ipcMain.handle("anka:addStep", (_e, botId, step) => ankaRecorder.addStep(botId, step));
@@ -160,13 +142,13 @@ function setupIpcHandlers() {
   ipcMain.handle("anka:clickSlot", async (_e, botId, slot, button) =>
     botManager.clickBotSlot(botId, slot, button)
   );
+
   ipcMain.handle("shell:openExternal", (_e, url) => shell.openExternal(url));
 }
 
 app.whenReady().then(async () => {
   await initialize();
   createWindow();
-
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

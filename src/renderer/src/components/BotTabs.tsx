@@ -8,6 +8,7 @@ export default function BotTabs() {
 
   const tabs = [
     { id: "bots",        label: "Боты" },
+    { id: "farm",        label: "🌾 Ферма" },
     { id: "models",      label: "Модели ИИ" },
     { id: "anarchy",     label: "🏴‍☠️ Анархия" },
     { id: "coordinator", label: "Координатор" },
@@ -17,22 +18,21 @@ export default function BotTabs() {
   return (
     <div
       className="flex items-center border-b overflow-x-auto"
-      style={{ borderColor: "#3a3a3a", background: "#222", minHeight: 34 }}
+      style={{ borderColor: "#3a3a3a", background: "rgba(20,20,20,0.9)", minHeight: 34 }}
     >
       {tabs.map((tab) => (
         <button
           key={tab.id}
-          onClick={() => setActiveTab(tab.id)}
+          onClick={() => setActiveTab(tab.id as any)}
           className="px-4 py-1.5 text-xs font-mono whitespace-nowrap transition-colors"
           style={{
             color: activeTab === tab.id
-              ? (tab.id === "anarchy" ? "#e74c3c" : "#7ecc49")
+              ? (tab.id === "anarchy" ? "#e74c3c" : tab.id === "farm" ? "#7ecc49" : "#7ecc49")
               : "#888",
             borderBottom: activeTab === tab.id
               ? `2px solid ${tab.id === "anarchy" ? "#e74c3c" : "#7ecc49"}`
               : "2px solid transparent",
-            background: "none",
-            cursor: "pointer",
+            background: "none", cursor: "pointer",
           }}
         >
           {tab.label}
@@ -60,25 +60,19 @@ export default function BotTabs() {
                   className="w-1.5 h-1.5 rounded-full"
                   style={{
                     background:
-                      bot.status === "online"
-                        ? "#7ecc49"
-                        : bot.status === "connecting"
-                        ? "#f1c40f"
-                        : "#555",
+                      bot.status === "online" ? "#7ecc49"
+                      : bot.status === "connecting" ? "#f1c40f"
+                      : "#555",
                   }}
                 />
                 {bot.config.nick}
-                {bot.config.aiEnabled && (
-                  <span className="text-xs" style={{ color: "#7ecc49" }}>⚡</span>
-                )}
               </button>
             ))}
           </div>
-
           <button
-            className="btn text-xs mx-2 py-1 px-2"
+            className="btn btn-primary text-xs mx-2 flex-shrink-0"
+            style={{ padding: "3px 10px", fontSize: 11 }}
             onClick={() => setShowCreate(true)}
-            style={{ color: "#7ecc49", borderColor: "#5b8c3e" }}
           >
             + Добавить бота
           </button>
