@@ -4,7 +4,14 @@
 
 const mineflayer = require("mineflayer");
 const { pathfinder, Movements, goals } = require("mineflayer-pathfinder");
-const { plugin: pvp } = require("mineflayer-pvp");
+
+// Дополнительные плагины майнфлаера для комфортной игры
+let collectBlockPlugin = null;
+let pvpPlugin = null;
+let armorManagerPlugin = null;
+try { collectBlockPlugin = require("mineflayer-collectblock").plugin; } catch(e) { /* не установлен */ }
+try { pvpPlugin = require("mineflayer-pvp").plugin; } catch(e) { /* не установлен */ }
+try { armorManagerPlugin = require("mineflayer-armor-manager"); } catch(e) { /* не установлен */ }
 const { SocksProxyAgent } = require("socks-proxy-agent");
 const { HttpProxyAgent } = require("http-proxy-agent");
 const { HttpsProxyAgent } = require("https-proxy-agent");
@@ -18,6 +25,7 @@ const { AgentLoop } = require("./agent-loop");
 const { AIBrain } = require("./ai-brain");
 const { AnarchyProtocol } = require("./anarchy-protocol");
 const { LobbyHandler } = require("./lobby-handler");
+const { AntiDetect } = require("./anti-detect");
 
 const RUSSIAN_OVERRIDE = `ВАЖНО: Ты общаешься НА РУССКОМ ЯЗЫКЕ. Все твои ответы должны быть на русском. `;
 
@@ -28,14 +36,16 @@ function nbtToStr(v) {
   if (typeof v === "object" && v !== null) {
     // NBT формат { type, value }
     if ("value" in v) return nbtToStr(v.value);
-    // ChatMessage объект (прямой вызов .toString())
+    // ChatMessage объект (mineflayer 4.x возвращает готовый объект)
     if (typeof v.toString === "function") {
       const s = v.toString();
       if (s !== "[object Object]") return s;
     }
-    // Ключ text или translate (JSON-чат компонент)
+    // JSON text component: {text:"..."} or {translate:"..."}
     if (v.text != null) return String(v.text);
     if (v.translate != null) return String(v.translate);
+    // extra/with arrays (chat components)
+    if (Array.isArray(v.extra)) return v.extra.map(nbtToStr).join("");
   }
   return String(v);
 }
@@ -56,10 +66,11 @@ const REGISTER_PATTERNS = [
 ];
 
 const LOGIN_PATTERNS = [
-  /\/login/i, /войдите/i, /авторизуйтесь/i, /please log in/i,
-  /use \/login/i, /введите \/login/i, /you must log in/i,
+  /\/login/i, /войдите/i, /авторизуйтесь/i, /login/i,
+  /please log in/i, /use \/login/i, /введите \/login/i,
+  /you must log in/i, /вы не авторизованы/i, /not logged in/i,
+  /type \/login/i, /авторизируйся/i, /для входа/i, /чтобы войти/i, /войди/i,
   /please authenticate/i, /enter your password/i, /введите пароль/i,
-  /вы не авторизованы/i, /not logged in/i, /type \/login/i,
 ];
 
 class BotInstance {
@@ -195,7 +206,9 @@ class BotManager {
     const botId = instance.id;
 
     bot.loadPlugin(pathfinder);
-    bot.loadPlugin(pvp);
+    if (collectBlockPlugin) { try { bot.loadPlugin(collectBlockPlugin); } catch {} }
+    if (pvpPlugin)          { try { bot.loadPlugin(pvpPlugin); } catch {} }
+    if (armorManagerPlugin) { try { bot.loadPlugin(armorManagerPlugin); } catch {} }
 
     bot.once("spawn", () => {
       instance.status = "online";
@@ -243,94 +256,135 @@ class BotManager {
       }
 
       const movements = new Movements(bot);
-      movements.allowSprinting = true;
+      // Не спринтим — спринт легко флагается анти-читом у нечеловечного бота
+      movements.allowSprinting = false;
       movements.canDig = true;
-      movements.allow1by1towers = true;
-      movements.maxDropDown = 4;
-      movements.allowParkour = false;
+      movements.allow1by1towers = false;
+      // Жидкость дорогая — бот не ходит по воде (анти-NoSlow флаг)
+      try { movements.liquidCost = 100; } catch {}
+      try { movements.waterCost = 100; } catch {}
+      // Не прыгаем с больших высот — предотвращаем flight/elytra флаги
+      try { movements.maxDropDown = 3; } catch {}
       bot.pathfinder.setMovements(movements);
 
-      // Обрабатываем принудительное перемещение от сервера (античит, телепорт).
-      // Сбрасываем pathfinder чтобы пересчитал маршрут с новой позиции.
+      // ── Vanilla physics: velocity clamp (анти-чит) ───────────────────
+      {
+        const WALK_MAX = 0.215;
+        const TERM_VEL = 3.92;
+        const _tickHandler = () => {
+          if (!bot.entity) return;
+          const vel = bot.entity.velocity;
+          const hSq = vel.x * vel.x + vel.z * vel.z;
+          if (hSq > WALK_MAX * WALK_MAX) {
+            const scale = WALK_MAX / Math.sqrt(hSq);
+            vel.x *= scale; vel.z *= scale;
+          }
+          if (vel.y < -TERM_VEL) vel.y = -TERM_VEL;
+        };
+        bot.on('physicsTick', _tickHandler);
+        bot.once('end', () => { try { bot.removeListener('physicsTick', _tickHandler); } catch {} });
+      }
+
+      // ── onGround correction: исправляем флаг перед отправкой пакета ──
+      {
+        const _origWrite = bot._client.write.bind(bot._client);
+        bot._client.write = function(name, params) {
+          if ((name === 'position' || name === 'position_look') && params && bot.entity) {
+            try {
+              const below = bot.blockAt(bot.entity.position.offset(0, -0.1, 0));
+              const actualOnGround = below && below.boundingBox === 'block'
+                ? bot.entity.position.y - Math.floor(bot.entity.position.y) < 0.05
+                : false;
+              if (params.onGround && !actualOnGround && bot.entity.velocity.y < -0.1) {
+                params = { ...params, onGround: false };
+              }
+            } catch {}
+          }
+          return _origWrite(name, params);
+        };
+        bot.once('end', () => { try { bot._client.write = _origWrite; } catch {} });
+      }
+
+      // ── Плавный поворот головы: lerp ~25°/тик (анти-KillAura флаг) ──
+      {
+        const _origLookAt = bot.lookAt.bind(bot);
+        bot.lookAt = async function(point, force = false) {
+          if (!bot.entity || !point) return _origLookAt(point, force);
+          try {
+            const dx = point.x - bot.entity.position.x;
+            const dy = (point.y != null ? point.y : bot.entity.position.y + 1.62) - (bot.entity.position.y + 1.62);
+            const dz = point.z - bot.entity.position.z;
+            const tYaw   = Math.atan2(-dx, dz);
+            const tPitch = Math.atan2(-dy, Math.sqrt(dx*dx + dz*dz));
+            let dYaw = tYaw - bot.entity.yaw;
+            while (dYaw >  Math.PI) dYaw -= 2 * Math.PI;
+            while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
+            const dPitch = tPitch - bot.entity.pitch;
+            const MAX_DEG = 0.44;
+            const steps = Math.ceil(Math.max(Math.abs(dYaw), Math.abs(dPitch)) / MAX_DEG);
+            if (steps <= 1 || force) return _origLookAt(point, force);
+            const startYaw = bot.entity.yaw, startPitch = bot.entity.pitch;
+            for (let i = 1; i <= steps; i++) {
+              if (!bot.entity) break;
+              const t = i / steps;
+              bot.entity.yaw   = startYaw   + dYaw   * t;
+              bot.entity.pitch = startPitch + dPitch * t;
+              await new Promise(r => setTimeout(r, 50));
+            }
+            return _origLookAt(point, true);
+          } catch { return _origLookAt(point, force); }
+        };
+      }
+
+      // ── forcedMove: сервер скорректировал позицию (античит/телепорт) ─
+      // НЕ сбрасываем pathfinder — он пересчитает маршрут сам с новой точки.
+      // Сброс каждый forcedMove это главная причина почему бот делает 2 шага и стоит.
       bot.on('forcedMove', () => {
-        try { bot.pathfinder.setGoal(null); } catch {}
-        try { bot.clearControlStates(); } catch {}
-        log.info(`[Bot ${botId}] forcedMove — сервер скорректировал позицию (античит?)`);
+        log.info(`[Bot ${botId}] forcedMove — позиция скорректирована сервером`);
       });
 
-      // ── Авто-подбор предметов с земли ─────────────────────────────────
-      const autoCollectTimer = setInterval(() => {
-        if (!bot?.entity) return;
-        if (this.configManager.get('autoCollect', true) === false) return;
+      // ── kick_disconnect: логируем причину кика ────────────────────────
+      bot._client?.on('kick_disconnect', (packet) => {
+        log.warn(`[Bot ${botId}] kick_disconnect:`, packet.reason);
+      });
 
-        const blacklist = new Set(this.configManager.get('pickupBlacklist', []));
-        let closest = null;
-        let closestDist = 7;
-
-        for (const entity of Object.values(bot.entities)) {
-          if (entity.name !== 'item' || !entity.position) continue;
-          // Получаем имя предмета из метаданных (Mineflayer 4.x)
-          let itemName = '';
-          try {
-            const meta = entity.metadata;
-            if (Array.isArray(meta)) {
-              for (const m of meta) {
-                if (m && typeof m === 'object' && m.value?.present !== undefined) {
-                  itemName = m.value?.blockId || m.value?.itemId || '';
-                  break;
-                }
-              }
-            }
-          } catch {}
-          if (itemName && blacklist.has(itemName)) continue;
-
-          const dist = bot.entity.position.distanceTo(entity.position);
-          if (dist < closestDist) { closest = entity; closestDist = dist; }
-        }
-
-        if (closest && closestDist > 0.5) {
-          bot.pathfinder?.goto(
-            new goals.GoalNear(closest.position.x, closest.position.y, closest.position.z, 0.5)
-          ).catch(() => {});
-        }
-      }, 2000);
-
-      bot.once('end', () => clearInterval(autoCollectTimer));
-
-      // ── Самооборона: атаковать игрока который бьёт нас ─────────────────
+      // ── Самооборона ──────────────────────────────────────────────────
       let prevHealth = bot.health || 20;
       bot.on('health', () => {
         if (!bot.entity) return;
         const newHealth = bot.health || 20;
+
+        // Авто-еда при низком здоровье (< 14/20)
+        if (newHealth < 14 && bot.food < 18) {
+          const foodItem = bot.inventory.items()
+            .filter(i => i.foodPoints && i.foodPoints > 0)
+            .sort((a, b) => (b.foodPoints || 0) - (a.foodPoints || 0))[0];
+          if (foodItem) {
+            bot.equip(foodItem, "hand").then(() => bot.consume().catch(() => {})).catch(() => {});
+          }
+        }
+
         if (newHealth < prevHealth && instance.config.selfDefense !== false) {
-          // Ищем ближайшего игрока который мог ударить (в радиусе 6 блоков)
-          let attacker = null;
-          let minDist = 7;
+          // Ищем атакующего среди ВСЕХ сущностей (игроки + мобы)
+          let attacker = null, minDist = 7;
           for (const e of Object.values(bot.entities)) {
             if (!e.position || e === bot.entity) continue;
             const isPlayer = e.type === 'player' || (e.username && e.username !== bot.username);
-            if (!isPlayer) continue;
+            const isMob = e.type === 'mob' || e.type === 'hostile';
+            if (!isPlayer && !isMob) continue;
             const dist = bot.entity.position.distanceTo(e.position);
             if (dist < minDist) { minDist = dist; attacker = e; }
           }
-          if (attacker && attacker.isValid) {
-            log.info(`[Bot ${botId}] Самооборона! Атакую ${attacker.username || attacker.name}`);
-            try { bot.lookAt(attacker.position.offset(0, (attacker.height || 1.8) * 0.85, 0)); } catch {}
-            if (bot.pvp) {
-              bot.pvp.attack(attacker);
-            } else {
-              setTimeout(() => bot.attack(attacker), 100);
+          if (attacker?.isValid) {
+            this.emit("bot:alert", { botId, type: "attacked", title: "⚔️ Бот атакован!", message: "Ник: " + instance.config.nick + " | Атакует: " + (attacker.username||attacker.displayName||attacker.name||"моб") });
+            // Передаём атакующего AgentLoop — он сам обработает с AntiDetect (плавный поворот, рандом тайминг)
+            if (instance.agentLoop) {
+              instance.agentLoop._registerAttacker(attacker);
             }
           }
         }
         prevHealth = newHealth;
       });
-
-      // ── Защита от кика: отвечаем на kick_disconnect ────────────────────
-      bot._client?.on('kick_disconnect', (packet) => {
-        log.warn(`[Bot ${botId}] kick_disconnect:`, packet.reason);
-      });
-
       this.emit("bot:statusChanged", { botId, status: "online" });
       this._addChat(instance, "system", "✅ Бот подключился к серверу. ИИ-мозг активирован.");
 
@@ -350,11 +404,32 @@ class BotManager {
       this.emit("bot:statsUpdated", { botId, stats: instance.stats });
     });
 
+    // Throttle: обновляем координаты не чаще 1 раза в 2 секунды
+    // (physicsTick = 20 раз/сек, прямая отправка IPC перегружает канал)
+    let _tickCounter = 0;
+    let _eatCooldown = 0;
+    let _isEating = false;
     bot.on("physicsTick", () => {
-      if (bot.entity) {
+      _tickCounter++;
+      if (_tickCounter % 40 === 0 && bot.entity) {
         instance.stats.x = Math.round(bot.entity.position.x);
         instance.stats.y = Math.round(bot.entity.position.y);
         instance.stats.z = Math.round(bot.entity.position.z);
+      }
+      // ── Авто-еда: кушаем когда голод < 16/20 (раз в ~5 сек) ──────
+      _eatCooldown++;
+      if (_eatCooldown >= 100 && !_isEating && bot.entity && bot.food != null && bot.food < 16) {
+        _eatCooldown = 0;
+        const foodItem = bot.inventory.items()
+          .filter(i => i.foodPoints && i.foodPoints > 0)
+          .sort((a, b) => (b.foodPoints || 0) - (a.foodPoints || 0))[0];
+        if (foodItem) {
+          _isEating = true;
+          bot.equip(foodItem, "hand")
+            .then(() => bot.consume())
+            .catch(() => {})
+            .finally(() => { _isEating = false; });
+        }
       }
     });
 
@@ -393,11 +468,19 @@ class BotManager {
 
       // Сообщаем лобби-хандлеру
       instance.lobbyHandler?.onChatMessage(text);
+
+      // Если сервер прислал HALTED / Invalid move — немедленно останавливаем движение
+      if (text.includes("HALTED") || text.includes("Invalid move") || text.includes("moved too quickly")) {
+        try { bot.clearControlStates(); } catch {}
+        try { bot.pathfinder.stop(); } catch {}
+        log.warn("[BotManager] Anti-cheat triggered, movement stopped for bot", botId);
+      }
     });
 
     bot.on("death", () => {
-      this._addChat(instance, "system", "💀 Бот умер");
-      this.emit("bot:death", { botId });
+      this._addChat(instance, "system", "💀 Бот умер! Позиция: " + Math.round(instance.stats?.x||0) + " " + Math.round(instance.stats?.y||0) + " " + Math.round(instance.stats?.z||0));
+      this.emit("bot:death", { botId, nick: instance.config.nick, pos: instance.stats, timestamp: Date.now() });
+      this.emit("bot:alert", { botId, type: "death", title: "💀 Бот умер!", message: "Ник: " + instance.config.nick + " | Сервер: " + instance.config.host, nick: instance.config.nick });
       instance.survivorAI?.onDeath();
     });
 
@@ -433,24 +516,25 @@ class BotManager {
 
     // ── Окна инвентаря (для рекордера анки) ───────────────────────────────
     const parseWindowTitle = (raw) => {
+      const extractText = (node) => {
+        if (!node) return "";
+        if (typeof node === "string") return node;
+        let text = String(node.text || node.translate || "");
+        if (Array.isArray(node.extra)) text += node.extra.map(extractText).join("");
+        if (Array.isArray(node.with)) text += node.with.map(extractText).join(" ");
+        return text;
+      };
       try {
-        // Поддержка обоих форматов: строки-JSON и объектов (Mineflayer 4.x)
-        const obj = (raw !== null && typeof raw === 'object') ? raw : JSON.parse(raw);
-        const extractText = (node) => {
-          if (!node) return "";
-          if (typeof node === "string") return node;
-          let text = "";
-          if (node.text) text += node.text;
-          else if (node.translate) text += node.translate;
-          if (Array.isArray(node.extra)) text += node.extra.map(extractText).join("");
-          if (Array.isArray(node.with)) text += node.with.map(extractText).join(" ");
-          return text;
-        };
-        const result = extractText(obj);
-        return result.trim() || (typeof raw === "string" ? raw : "");
+        // win.title может уже быть объектом (mineflayer распарсил JSON сам)
+        if (raw != null && typeof raw === "object") {
+          return extractText(raw).trim() || "";
+        }
+        if (!raw) return "";
+        const p = JSON.parse(raw);
+        return extractText(p).trim() || String(raw);
       } catch {
-        // raw — строка которая не JSON (обычное название)
-        return typeof raw === "string" ? raw : String(raw ?? "");
+        // Если не JSON — вернуть как строку (никогда объект)
+        return raw != null ? String(raw) : "";
       }
     };
 
@@ -460,15 +544,19 @@ class BotManager {
       const slots = [];
       const winSlots = win.slots || [];
       // inventoryStart = первый слот инвентаря игрока (только слоты самого окна)
-      const slotCount = win.inventoryStart > 0
+      // Используем inventoryStart если он > 0, иначе берём длину массива (до 54)
+      const slotCount = (win.inventoryStart != null && win.inventoryStart > 0)
         ? win.inventoryStart
         : Math.min(winSlots.length, 54);
+      // Если вообще нет слотов — не шлём пустое окно, ждём updateSlot
+      if (slotCount === 0) return;
       for (let i = 0; i < slotCount; i++) {
         const item = winSlots[i];
-        const name = item ? nbtToStr(item.name) : "";
-        const displayName = item
-          ? (nbtToStr(item.displayName) || name.replace(/_/g, " "))
-          : "";
+        // Убираем префикс "minecraft:" из имён предметов
+        const rawName = item ? nbtToStr(item.name) : "";
+        const name = rawName.replace(/^minecraft:/, "");
+        const rawDisplay = item ? nbtToStr(item.displayName) : "";
+        const displayName = rawDisplay.replace(/^minecraft:/, "") || name.replace(/_/g, " ");
         slots.push({
           slot: i,
           name,
@@ -484,25 +572,32 @@ class BotManager {
         log.info(`[BotManager] windowOpen: "${win?.title}" slots=${win?.slots?.length} invStart=${win?.inventoryStart}`);
         emitWindowSlots(win);
 
-        // Серверы присылают предметы чуть позже — переотправляем через 500 мс
+        // Дебаунс: собираем все updateSlot за 80ms и шлём один раз
+        let slotDebounceTimer = null;
+        const debouncedEmit = () => {
+          if (slotDebounceTimer) clearTimeout(slotDebounceTimer);
+          slotDebounceTimer = setTimeout(() => {
+            slotDebounceTimer = null;
+            try {
+              if (bot.currentWindow === win) emitWindowSlots(win);
+            } catch (e) {
+              log.warn(`[BotManager] debounced emit error: ${e.message}`);
+            }
+          }, 80);
+        };
+
+        // Первая отправка через 150ms — к этому моменту сервер уже прислал предметы
         setTimeout(() => {
           try {
             if (bot.currentWindow === win) emitWindowSlots(win);
           } catch (e) {
-            log.warn(`[BotManager] windowOpen retry error: ${e.message}`);
+            log.warn(`[BotManager] windowOpen initial emit error: ${e.message}`);
           }
-        }, 500);
+        }, 150);
 
-        // Подписываемся на обновление отдельных слотов
+        // Подписываемся на обновление отдельных слотов (с дебаунсом)
         if (win && typeof win.on === "function") {
-          const slotHandler = () => {
-            try {
-              if (bot.currentWindow === win) emitWindowSlots(win);
-            } catch (e) {
-              log.warn(`[BotManager] updateSlot handler error: ${e.message}`);
-            }
-          };
-          win.on("updateSlot", slotHandler);
+          win.on("updateSlot", debouncedEmit);
         }
       } catch (err) {
         log.error(`[BotManager] windowOpen handler crashed: ${err.message}`);
@@ -527,8 +622,6 @@ class BotManager {
   async _tryInitialAuth(instance) {
     const pass = this.configManager.getGlobalPassword();
     if (!pass) return;
-    // Сначала ждём 3 секунды — сервер сам должен попросить
-    // Если через 5 сек не попросил — пробуем /login сами (для серверов без приглашения)
     setTimeout(() => {
       if (instance._authAttempted || !instance.bot) return;
       if (!instance.config.autoLogin) return;
@@ -556,13 +649,13 @@ class BotManager {
           }
         }, 1000);
       }
-    } else if (instance.config.autoLogin && LOGIN_PATTERNS.some(p => p.test(m))) {
+    } else if (instance.config.autoLogin && !instance._authAttempted && LOGIN_PATTERNS.some(p => p.test(m))) {
+      instance._authAttempted = true;
       log.info("[BotManager] Auto-login triggered by chat:", message);
       setTimeout(() => {
         if (instance.bot) {
           instance.bot.chat("/login " + pass);
           this._addChat(instance, "system", "🔑 Авто-логин выполнен");
-          instance._authAttempted = true;
         }
       }, 1000);
     }
@@ -579,6 +672,7 @@ class BotManager {
       REGISTER_PATTERNS.some(p => p.test(lower));
 
     const needsLogin = instance.config.autoLogin &&
+      !instance._authAttempted &&
       LOGIN_PATTERNS.some(p => p.test(lower));
 
     if (needsRegister) {
@@ -604,7 +698,7 @@ class BotManager {
 
   // ══════════════════════════════════════════════════════════════════════
   // ОБРАБОТКА СООБЩЕНИЙ — через AIBrain (v4)
-  // ════════════════════════════════════════════════════════���═════════════
+  // ══════════════════════════════════════════════════════════════════════
 
   async _handlePlayerMessage(instance, username, message) {
     if (!instance.bot?.entity) return;
@@ -783,6 +877,10 @@ class BotManager {
     instance.anarchyProtocol?.stop();
     instance.lobbyHandler?.stop();
     instance.lobbyHandler = null;
+    instance.agentLoop?.stop();
+    instance.agentLoop = null;
+    instance.antiDetect?.stop();
+    instance.antiDetect = null;
     if (instance.survivorAI?.isRunning) await instance.survivorAI.stop().catch(() => {});
     if (instance.taskManager) await instance.taskManager.stopAll().catch(() => {});
     if (instance.bot) { try { instance.bot.quit(); } catch {} instance.bot = null; }
@@ -962,6 +1060,32 @@ class BotManager {
     }
   }
 
+
+  // ── Запуск/остановка скриптовой задачи ───────────────────────────────────
+  async runBotTask(botId, taskName, args) {
+    const instance = this.bots.get(botId);
+    if (!instance?.bot || instance.status !== "online") throw new Error("Бот не в сети");
+    if (!instance.taskManager) {
+      const { TaskManager } = require("./bot-tasks");
+      instance.taskManager = new TaskManager(instance, this.emit);
+    }
+    this.emit("bot:taskStarted", { botId, task: taskName });
+    instance.taskManager.runTask(taskName, args || {}).then(() => {
+      this.emit("bot:taskStopped", { botId, task: taskName });
+    }).catch(err => {
+      this.emit("bot:taskStopped", { botId, task: taskName, error: err.message });
+    });
+    return { success: true, task: taskName };
+  }
+
+  stopBotTask(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance?.taskManager) return { success: false };
+    instance.taskManager.stopAll().catch(() => {});
+    this.emit("bot:taskStopped", { botId });
+    return { success: true };
+  }
+
   async startAnarchyProtocol(botId, opts) {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error("Бот не подключён");
@@ -1030,7 +1154,7 @@ class BotManager {
     }
 
     // ── Случай 2: хотбар (mineflayer слоты 36–44, или 0–8 в UI) ──────────
-    // mineflayer: bot.inventory.items() возвращает слоты 36���44 для хотбара
+    // mineflayer: bot.inventory.items() возвращает слоты 36–44 для хотбара
     const isHotbar = (slot >= 36 && slot <= 44) || (slot >= 0 && slot <= 8);
     const hotbarIndex = slot >= 36 ? slot - 36 : slot;   // 0–8
 

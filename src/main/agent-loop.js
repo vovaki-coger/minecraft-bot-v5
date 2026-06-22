@@ -207,14 +207,24 @@ class AgentLoop {
 
     try {
       if (dist > 3.2) {
+        // Спринт при преследовании: кратковременно включаем для скорости,
+        // но сразу выключаем чтобы не флагать анти-чит постоянным спринтом
+        try {
+          const mv = bot.pathfinder.movements;
+          if (mv && !mv.allowSprinting) {
+            mv.allowSprinting = true;
+            setTimeout(() => { try { if (mv) mv.allowSprinting = false; } catch {} }, 1200);
+          }
+        } catch {}
+
         // AntiDetect: не перезапускаем pathfinder если цель не ушла далеко
         const moved = !this._moveTargetPos ||
-          this._moveTargetPos.distanceTo(target.position) > 3;
+          this._moveTargetPos.distanceTo(target.position) > 2.5;
 
         if (!this._movingToTarget || moved) {
           this._movingToTarget = true;
           this._moveTargetPos = target.position.clone();
-          // GoalFollow: бот следует за движущейся целью вместо точки
+          // GoalFollow: бот следует за движущейся целью (не перезапускает каждые 200мс)
           bot.pathfinder.goto(new goals.GoalFollow(target, 2))
             .then(() => { this._movingToTarget = false; })
             .catch(() => { this._movingToTarget = false; });
