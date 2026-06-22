@@ -215,46 +215,59 @@ class BotManager {
       instance.status = "online";
       instance.captchaHandler = new CaptchaHandler(instance, this.ollamaManager);
       instance.taskManager = new TaskManager(instance, this.emit);
-      instance.agentLoop = new AgentLoop(instance, this.emit);
 
-      // === LobbyHandler v4 ===
-      if (instance.config.lobbyConfig?.enabled !== false) {
-        instance.lobbyHandler = new LobbyHandler(instance, this.emit);
-        instance.lobbyHandler.start();
-      }
+      // === IDLE НА ПОДКЛЮЧЕНИИ — анти-детект ботов ===
+      // Стоим неподвижно 8-12 секунд сразу после спавна.
+      // Большинство анти-чит систем следят за первыми 10 сек жизни пакетов.
+      const spawnIdleMs = 8000 + Math.random() * 4000;
+      instance._spawnIdle = true;
+      this._addChat(instance, "system", `⏳ Анти-детект: стоим ${Math.round(spawnIdleMs/1000)}с...`);
+      log.info(`[Bot ${botId}] Spawn idle ${Math.round(spawnIdleMs/1000)}s`);
 
-      // === Попытка авто-логина при спавне ===
-      // Многие серверы ждут когда бот загрузится и затем отправляют /login
-      // Но некоторые сразу ждут — пробуем через 2 секунды
-      if (instance.config.autoLogin || instance.config.autoRegister) {
-        setTimeout(() => {
-          this._tryInitialAuth(instance);
-        }, 2000);
-      }
+      setTimeout(() => {
+        if (!instance.bot) return;
+        instance._spawnIdle = false;
+        log.info(`[Bot ${botId}] Spawn idle done — ИИ активирован`);
+        this._addChat(instance, "system", "✅ Анти-детект пройден. ИИ-мозг активирован.");
 
-      // === ИНИЦИАЛИЗАЦИЯ AI BRAIN (v4) ===
-      if (instance.aiEnabled) {
-        const configuredModel = instance.config.aiModel || "";
-        const needsAutoDetect = !configuredModel || configuredModel === "auto";
-        if (needsAutoDetect) {
-          this.ollamaManager.getPreferredModel?.().then(preferred => {
-            if (preferred) {
-              instance.config.aiModel = preferred;
-              log.info("[BotManager] Auto-selected model:", preferred);
-              this.emit("bot:modelDetected", { botId, model: preferred });
-            }
-          }).catch(() => {});
+        // === Инициализируем AgentLoop ПОСЛЕ idle ===
+        instance.agentLoop = new AgentLoop(instance, this.emit);
+
+        // === LobbyHandler v4 ===
+        if (instance.config.lobbyConfig?.enabled !== false) {
+          instance.lobbyHandler = new LobbyHandler(instance, this.emit);
+          instance.lobbyHandler.start();
         }
 
-        instance.aiBrain = new AIBrain(
-          instance,
-          this.ollamaManager,
-          instance.taskManager,
-          this.emit
-        );
-        instance.aiBrain.startAutonomous(10000);
-        log.info("[BotManager] AIBrain started for bot", botId);
-      }
+        // === Попытка авто-логина ===
+        if (instance.config.autoLogin || instance.config.autoRegister) {
+          setTimeout(() => this._tryInitialAuth(instance), 2000);
+        }
+
+        // === ИНИЦИАЛИЗАЦИЯ AI BRAIN (v4) ===
+        if (instance.aiEnabled) {
+          const configuredModel = instance.config.aiModel || "";
+          const needsAutoDetect = !configuredModel || configuredModel === "auto";
+          if (needsAutoDetect) {
+            this.ollamaManager.getPreferredModel?.().then(preferred => {
+              if (preferred) {
+                instance.config.aiModel = preferred;
+                log.info("[BotManager] Auto-selected model:", preferred);
+                this.emit("bot:modelDetected", { botId, model: preferred });
+              }
+            }).catch(() => {});
+          }
+
+          instance.aiBrain = new AIBrain(
+            instance,
+            this.ollamaManager,
+            instance.taskManager,
+            this.emit
+          );
+          instance.aiBrain.startAutonomous(10000);
+          log.info("[BotManager] AIBrain started for bot", botId);
+        }
+      }, spawnIdleMs);
 
       const movements = new Movements(bot);
       // Не спринтим — спринт легко флагается анти-читом у нечеловечного бота
@@ -292,13 +305,21 @@ class BotManager {
         if (!bot.entity) return;
         const newHealth = bot.health || 20;
 
-        // Авто-еда при низком здоровье (< 14/20)
+        // Авто-еда при низком здоровье (< 14/20) — анти-чит: стоп перед едой
         if (newHealth < 14 && bot.food < 18) {
           const foodItem = bot.inventory.items()
             .filter(i => i.foodPoints && i.foodPoints > 0)
             .sort((a, b) => (b.foodPoints || 0) - (a.foodPoints || 0))[0];
           if (foodItem) {
-            bot.equip(foodItem, "hand").then(() => bot.consume().catch(() => {})).catch(() => {});
+            try { bot.clearControlStates(); } catch {}
+            try { bot.pathfinder.stop(); } catch {}
+            setTimeout(() => {
+              if (!bot.entity) return;
+              bot.equip(foodItem, "hand")
+                .then(() => new Promise(r => setTimeout(r, 80 + Math.random() * 60)))
+                .then(() => bot.consume())
+                .catch(() => {});
+            }, 180 + Math.floor(Math.random() * 150));
           }
         }
 
@@ -355,6 +376,8 @@ class BotManager {
         instance.stats.z = Math.round(bot.entity.position.z);
       }
       // ── Авто-еда: кушаем когда голод < 16/20 (раз в ~5 сек) ──────
+      // Анти-чит: НЕЛЬЗЯ есть во время движения.
+      // Обход: сначала стоп, потом задержка 200-400ms (human reaction), потом consume.
       _eatCooldown++;
       if (_eatCooldown >= 100 && !_isEating && bot.entity && bot.food != null && bot.food < 16) {
         _eatCooldown = 0;
@@ -363,10 +386,22 @@ class BotManager {
           .sort((a, b) => (b.foodPoints || 0) - (a.foodPoints || 0))[0];
         if (foodItem) {
           _isEating = true;
-          bot.equip(foodItem, "hand")
-            .then(() => bot.consume())
-            .catch(() => {})
-            .finally(() => { _isEating = false; });
+          // Стоп всех движений — анти-чит флагует consume во время ходьбы
+          try { bot.clearControlStates(); } catch {}
+          try { bot.pathfinder.stop(); } catch {}
+          // Ждём 200-400ms как человек (время между решением поесть и нажатием)
+          const eatDelay = 200 + Math.floor(Math.random() * 200);
+          setTimeout(() => {
+            if (!bot.entity || bot.food >= 16) { _isEating = false; return; }
+            bot.equip(foodItem, "hand")
+              .then(() => {
+                // Дополнительная задержка после экипировки (человек смотрит что взял)
+                return new Promise(r => setTimeout(r, 80 + Math.random() * 60))
+                  .then(() => bot.consume());
+              })
+              .catch(() => {})
+              .finally(() => { _isEating = false; });
+          }, eatDelay);
         }
       }
     });
@@ -1369,14 +1404,37 @@ class BotManager {
     const bot = instance.bot;
     try {
       if (bot.currentWindow) {
+        // Контейнер/сундук открыт — кликаем через стандартный API
         await bot.clickWindow(slot, button ?? 0, 0);
+        log.info(`[BotManager] clickWindow slot=${slot} button=${button} (container)`);
       } else {
-        // No window open — click inventory directly
-        await bot.clickWindow(slot, button ?? 0, 0);
+        // Главный инвентарь (без открытого контейнера).
+        // Mineflayer clickWindow требует currentWindow, поэтому
+        // временно устанавливаем inventory.window как текущее окно.
+        const invWin = bot.inventory?.window || bot.inventory;
+        if (invWin) {
+          const savedWindow = bot.currentWindow;
+          bot.currentWindow = invWin;
+          try {
+            await bot.clickWindow(slot, button ?? 0, 0);
+            log.info(`[BotManager] clickWindow slot=${slot} button=${button} (inventory)`);
+          } finally {
+            bot.currentWindow = savedWindow;
+          }
+        } else {
+          // Крайний случай: hotbar — меняем активный слот
+          if (slot >= 36 && slot <= 44) {
+            await bot.setQuickBarSlot(slot - 36);
+            log.info(`[BotManager] setQuickBarSlot ${slot - 36}`);
+          }
+        }
       }
     } catch (err) {
-      // clickWindow may fail if no window — try activateItem
-      if (button === 1) bot.activateItem?.();
+      log.warn(`[BotManager] clickInventorySlot error slot=${slot}: ${err.message}`);
+      // Запасной вариант для hotbar
+      if (slot >= 36 && slot <= 44) {
+        try { await bot.setQuickBarSlot(slot - 36); } catch {}
+      }
     }
     return { success: true };
   }

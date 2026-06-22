@@ -13,9 +13,9 @@ export default function RightPanel({ bot }: Props) {
   const [activeTab, setActiveTab] = useState<ChatTab>("minecraft");
   const [autoResponse, setAutoResponse] = useState(false);
   const [lobbyLoading, setLobbyLoading] = useState(false);
+
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const aiChatContainerRef = useRef<HTMLDivElement>(null);
-
   const userScrolledRef = useRef(false);
   const aiUserScrolledRef = useRef(false);
 
@@ -23,41 +23,35 @@ export default function RightPanel({ bot }: Props) {
     const el = chatContainerRef.current;
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    userScrolledRef.current = distFromBottom > 80;
+    userScrolledRef.current = distFromBottom > 60;
   }, []);
 
   const handleAiChatScroll = useCallback(() => {
     const el = aiChatContainerRef.current;
     if (!el) return;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    aiUserScrolledRef.current = distFromBottom > 80;
+    aiUserScrolledRef.current = distFromBottom > 60;
   }, []);
 
-  const scrollToBottom = useCallback((ref: React.RefObject<HTMLDivElement>, userScrolled: React.MutableRefObject<boolean>) => {
-    const el = ref.current;
-    if (!el || userScrolled.current) return;
+  useEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el || userScrolledRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, []);
+  }, [bot?.chatHistory]);
 
   useEffect(() => {
-    scrollToBottom(chatContainerRef, userScrolledRef);
-  }, [bot?.chatHistory, scrollToBottom]);
+    const el = aiChatContainerRef.current;
+    if (!el || aiUserScrolledRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [bot?.aiChatHistory]);
 
   useEffect(() => {
-    scrollToBottom(aiChatContainerRef, aiUserScrolledRef);
-  }, [bot?.aiChatHistory, scrollToBottom]);
-
-  useEffect(() => {
-    if (bot) {
-      setAutoResponse(!!(bot.config as any).autoResponse);
-    }
+    if (bot) setAutoResponse(!!(bot.config as any).autoResponse);
   }, [bot?.id]);
 
   async function handleAutoResponseToggle(checked: boolean) {
     setAutoResponse(checked);
-    if (bot) {
-      await window.electronAPI.bot.updateConfig(bot.id, { autoResponse: checked });
-    }
+    if (bot) await window.electronAPI.bot.updateConfig(bot.id, { autoResponse: checked });
   }
 
   async function handleSendMinecraft() {
@@ -75,9 +69,7 @@ export default function RightPanel({ bot }: Props) {
   async function handleTriggerLobby() {
     if (!bot) return;
     setLobbyLoading(true);
-    try {
-      await window.electronAPI.bot.triggerLobby(bot.id);
-    } catch {}
+    try { await window.electronAPI.bot.triggerLobby(bot.id); } catch {}
     setLobbyLoading(false);
   }
 
@@ -120,7 +112,10 @@ export default function RightPanel({ bot }: Props) {
   const aiMessages = bot?.aiChatHistory || [];
 
   return (
-    <div className="panel flex-shrink-0 flex flex-col" style={{ width: 320, overflow: "hidden" }}>
+    <div
+      className="panel flex-shrink-0 flex flex-col"
+      style={{ width: 320, overflow: "hidden", height: "100%", minHeight: 0 }}
+    >
       {/* Tabs */}
       <div className="flex border-b flex-shrink-0" style={{ borderColor: "#3a3a3a" }}>
         <button
@@ -150,6 +145,7 @@ export default function RightPanel({ bot }: Props) {
       {/* Minecraft Chat Tab */}
       {activeTab === "minecraft" && (
         <>
+          {/* Header */}
           <div
             className="flex items-center justify-between px-3 py-1.5 border-b flex-shrink-0"
             style={{ borderColor: "#3a3a3a" }}
@@ -182,26 +178,38 @@ export default function RightPanel({ bot }: Props) {
             </div>
           </div>
 
+          {/* Chat messages — fixed area with scroll */}
           <div
             ref={chatContainerRef}
             onScroll={handleChatScroll}
-            className="flex-1 overflow-y-auto p-2"
-            style={{ fontFamily: "'Courier New', monospace", fontSize: 12, lineHeight: 1.5, minHeight: 0 }}
+            style={{
+              flex: "1 1 0",
+              overflowY: "scroll",
+              padding: "6px 8px",
+              minHeight: 0,
+              fontFamily: "'Courier New', monospace",
+              fontSize: 11.5,
+              lineHeight: 1.55,
+              scrollbarWidth: "thin",
+              scrollbarColor: "rgba(126,204,73,0.25) transparent",
+              wordBreak: "break-word",
+            }}
           >
             {mcMessages.length === 0 ? (
-              <div className="text-center mt-8" style={{ color: "#555" }}>
+              <div style={{ textAlign: "center", marginTop: 32, color: "#555", fontSize: 11 }}>
                 {bot ? "Сообщений нет" : "Выберите бота"}
               </div>
             ) : (
               mcMessages.map((msg, i) => (
-                <div key={i} className="mb-0.5">
-                  <span style={{ color: "#555", marginRight: 4 }}>[{formatTime(msg.timestamp)}]</span>
+                <div key={i} style={{ marginBottom: 2 }}>
+                  <span style={{ color: "#444", marginRight: 4, fontSize: 10 }}>[{formatTime(msg.timestamp)}]</span>
                   <span style={{ color: getMsgColor(msg.type) }}>{msg.text}</span>
                 </div>
               ))
             )}
           </div>
 
+          {/* Input */}
           <div className="p-2 border-t flex-shrink-0" style={{ borderColor: "#3a3a3a" }}>
             <div className="flex gap-1">
               <input
@@ -209,13 +217,14 @@ export default function RightPanel({ bot }: Props) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => handleKeyDown(e, "mc")}
-                placeholder={bot?.status === "online" ? "Написать в Minecraft чат..." : "Спросить у ИИ..."}
-                disabled={!bot}
+                placeholder={bot?.status === "online" ? "Написать в Minecraft чат..." : "Бот оффлайн"}
+                disabled={!bot || bot.status !== "online"}
+                style={{ fontSize: 11 }}
               />
               <button
                 className="btn btn-primary text-xs px-3"
                 onClick={handleSendMinecraft}
-                disabled={!bot || !input.trim()}
+                disabled={!bot || bot.status !== "online" || !input.trim()}
               >
                 ➤
               </button>
@@ -236,23 +245,33 @@ export default function RightPanel({ bot }: Props) {
           <div
             ref={aiChatContainerRef}
             onScroll={handleAiChatScroll}
-            className="flex-1 overflow-y-auto p-2"
-            style={{ fontFamily: "'Courier New', monospace", fontSize: 12, lineHeight: 1.5, minHeight: 0 }}
+            style={{
+              flex: "1 1 0",
+              overflowY: "scroll",
+              padding: "6px 8px",
+              minHeight: 0,
+              fontFamily: "'Courier New', monospace",
+              fontSize: 11.5,
+              lineHeight: 1.55,
+              scrollbarWidth: "thin",
+              scrollbarColor: "rgba(192,132,252,0.25) transparent",
+              wordBreak: "break-word",
+            }}
           >
             {aiMessages.length === 0 ? (
-              <div className="text-center mt-8" style={{ color: "#555" }}>
+              <div style={{ textAlign: "center", marginTop: 32, color: "#555", fontSize: 11 }}>
                 {bot ? (
                   <>
                     <p>ИИ-чат пуст</p>
-                    <p className="mt-1 text-xs" style={{ color: "#444" }}>Сообщения здесь не видны в игре</p>
+                    <p style={{ marginTop: 4, fontSize: 10, color: "#444" }}>Сообщения здесь не видны в игре</p>
                   </>
                 ) : "Выберите бота"}
               </div>
             ) : (
               aiMessages.map((msg, i) => (
-                <div key={i} className="mb-1">
-                  <span style={{ color: "#555", marginRight: 4 }}>[{formatTime(msg.timestamp)}]</span>
-                  <span style={{ color: "#888", marginRight: 4 }}>
+                <div key={i} style={{ marginBottom: 4 }}>
+                  <span style={{ color: "#444", marginRight: 4, fontSize: 10 }}>[{formatTime(msg.timestamp)}]</span>
+                  <span style={{ color: "#555", marginRight: 4, fontSize: 10 }}>
                     {msg.type === "user" ? "[Вы]" : msg.type === "ai" ? "[ИИ]" : "[Сис]"}
                   </span>
                   <span style={{ color: getAIMsgColor(msg.type) }}>{msg.text}</span>
@@ -270,6 +289,7 @@ export default function RightPanel({ bot }: Props) {
                 onKeyDown={(e) => handleKeyDown(e, "ai")}
                 placeholder="Спросить у ИИ (не попадёт в игру)..."
                 disabled={!bot}
+                style={{ fontSize: 11 }}
               />
               <button
                 className="btn text-xs px-3"
