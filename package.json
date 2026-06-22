@@ -1,6 +1,6 @@
 {
   "name": "@workspace/minecraft-bot-v5",
-  "version": "5.5.5",
+  "version": "5.6.0",
   "description": "PrizmarinBot v5 — AntiDetect, LobbyHandler, AI-мозг",
   "main": "src/main/index.js",
   "private": true,
@@ -36,7 +36,8 @@
     "electron-updater": "^6.3.9",
     "crypto-js": "^4.2.0",
     "axios": "^1.7.9",
-    "uuid": "^11.0.5"
+    "uuid": "^11.0.5",
+    "brain.js": "^2.0.0-beta.23"
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",

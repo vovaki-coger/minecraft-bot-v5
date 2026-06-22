@@ -2,99 +2,221 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Google Fonts ──────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
 * { box-sizing: border-box; }
 
+:root {
+  --accent:      #7ecc49;
+  --accent-dim:  #4a8c20;
+  --accent-glow: rgba(126,204,73,0.25);
+  --danger:      #e74c3c;
+  --danger-glow: rgba(231,76,60,0.25);
+  --pvp:         #9b59b6;
+  --pvp-glow:    rgba(155,89,182,0.25);
+  --warning:     #f39c12;
+  --cyan:        #2ec4b6;
+  --bg:          #090d12;
+  --bg-panel:    rgba(12,16,22,0.88);
+  --border:      rgba(40,55,80,0.6);
+}
+
 body {
-  background: #0d1117;
-  color: #e0e0e0;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: #dde3ec;
+  font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
   font-size: 13px;
   margin: 0; padding: 0;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/* ── Custom Scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+::-webkit-scrollbar-thumb { background: rgba(126,204,73,0.2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(126,204,73,0.4); }
 
-/* Semi-transparent panels so star background shows through */
+/* ── Panels ────────────────────────────────────────────────────────────── */
 .panel {
-  background: rgba(14, 18, 26, 0.82);
-  border: 1px solid rgba(55, 65, 88, 0.55);
-  border-radius: 6px;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 0 0 0.5px rgba(126,204,73,0.04) inset,
+    0 2px 12px rgba(0,0,0,0.4);
 }
 
+/* ── Buttons ───────────────────────────────────────────────────────────── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
-  gap: 4px; padding: 5px 10px; border-radius: 4px;
-  border: 1px solid #333;
-  background: rgba(26, 30, 42, 0.88);
-  color: #ccc;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
+  gap: 5px; padding: 5px 11px; border-radius: 5px;
+  border: 1px solid rgba(60,70,90,0.7);
+  background: rgba(18,22,32,0.9);
+  color: #bdc8d8;
+  font-family: "JetBrains Mono", monospace;
   font-size: 12px; cursor: pointer;
-  transition: all 0.14s ease;
+  transition: all 0.15s ease;
   white-space: nowrap; user-select: none;
+  letter-spacing: 0.01em;
 }
-.btn:hover:not(:disabled) { background: rgba(38, 44, 60, 0.95); border-color: #555; color: #eee; }
+.btn:hover:not(:disabled) {
+  background: rgba(28,36,52,0.95);
+  border-color: rgba(100,120,150,0.7);
+  color: #e8eef5;
+  box-shadow: 0 0 8px rgba(0,0,0,0.4);
+}
 .btn:active:not(:disabled) { transform: scale(0.97); }
-.btn:disabled { opacity: 0.38; cursor: not-allowed; }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
-.btn-primary { background: rgba(28, 72, 18, 0.88); border-color: #4a8c20; color: #7ecc49; }
-.btn-primary:hover:not(:disabled) { background: rgba(38, 92, 24, 0.95); border-color: #7ecc49; box-shadow: 0 0 10px rgba(126,204,73,0.22); }
+.btn-primary {
+  background: rgba(18,46,12,0.9);
+  border-color: rgba(74,140,32,0.8);
+  color: var(--accent);
+}
+.btn-primary:hover:not(:disabled) {
+  background: rgba(26,60,16,0.95);
+  border-color: var(--accent);
+  box-shadow: 0 0 14px var(--accent-glow), 0 0 4px var(--accent-glow) inset;
+}
 
-.btn-danger { background: rgba(72, 18, 18, 0.88); border-color: #7c2828; color: #e74c3c; }
-.btn-danger:hover:not(:disabled) { background: rgba(92, 24, 24, 0.95); border-color: #e74c3c; box-shadow: 0 0 10px rgba(231,76,60,0.22); }
+.btn-danger {
+  background: rgba(46,12,12,0.9);
+  border-color: rgba(120,36,36,0.8);
+  color: var(--danger);
+}
+.btn-danger:hover:not(:disabled) {
+  background: rgba(60,16,16,0.95);
+  border-color: var(--danger);
+  box-shadow: 0 0 14px var(--danger-glow);
+}
 
-.btn-warning { background: rgba(64, 40, 8, 0.88); border-color: #7c5218; color: #f39c12; }
-.btn-warning:hover:not(:disabled) { background: rgba(80, 52, 12, 0.95); border-color: #f39c12; box-shadow: 0 0 10px rgba(243,156,18,0.22); }
+.btn-warning {
+  background: rgba(40,24,4,0.9);
+  border-color: rgba(120,84,24,0.8);
+  color: var(--warning);
+}
+.btn-warning:hover:not(:disabled) {
+  border-color: var(--warning);
+  box-shadow: 0 0 14px rgba(243,156,18,0.2);
+}
 
+/* ── Inputs ────────────────────────────────────────────────────────────── */
 .input {
   width: 100%; padding: 6px 10px;
-  background: rgba(8, 10, 16, 0.9);
-  border: 1px solid #2a3040;
-  border-radius: 4px; color: #e0e0e0;
+  background: rgba(6,8,14,0.95);
+  border: 1px solid rgba(35,45,65,0.8);
+  border-radius: 5px; color: #dde3ec;
   font-family: "JetBrains Mono", monospace;
-  font-size: 12px; transition: border-color 0.14s; outline: none;
+  font-size: 12px; transition: border-color 0.15s, box-shadow 0.15s; outline: none;
 }
-.input:focus { border-color: #4a8c20; box-shadow: 0 0 0 2px rgba(126,204,73,0.14); }
-.input::placeholder { color: #3a3a3a; }
+.input:focus {
+  border-color: rgba(126,204,73,0.6);
+  box-shadow: 0 0 0 2px rgba(126,204,73,0.1), 0 0 8px rgba(126,204,73,0.08);
+}
+.input::placeholder { color: rgba(100,110,130,0.6); }
 
-/* ── Star twinkle animations ───────────────────────────────────────────── */
+/* ── Chat messages ─────────────────────────────────────────────────────── */
+.chat-msg { padding: 1.5px 0; line-height: 1.5; word-break: break-word; font-size: 11.5px; }
+.chat-msg.bot      { color: var(--accent); }
+.chat-msg.player   { color: #6db3e8; }
+.chat-msg.ai       { color: #c084fc; }
+.chat-msg.system   { color: rgba(140,150,170,0.7); font-style: italic; }
+.chat-msg.server   { color: #e6a14a; }
+.chat-msg.survivor { color: var(--danger); }
+
+/* ── Status dots ───────────────────────────────────────────────────────── */
+.status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.status-dot.online  { background: var(--accent); box-shadow: 0 0 7px var(--accent-glow); }
+.status-dot.offline { background: #2a2f3a; }
+.status-dot.connecting { background: var(--warning); animation: pulseWarn 1.1s infinite; }
+
+/* ── Animations ────────────────────────────────────────────────────────── */
 @keyframes twinkle {
-  0%, 100% { opacity: 0.12; transform: scale(0.85); }
-  50%       { opacity: 0.95; transform: scale(1.15); }
+  0%, 100% { opacity: 0.1; transform: scale(0.8); }
+  50%       { opacity: 1; transform: scale(1.2); }
 }
 @keyframes twinkleSlow {
-  0%, 100% { opacity: 0.06; }
-  50%       { opacity: 0.55; }
+  0%, 100% { opacity: 0.05; }
+  50%       { opacity: 0.5; }
 }
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(231,76,60,0.4); }
-  50%       { box-shadow: 0 0 14px rgba(231,76,60,0.85); }
+  0%, 100% { box-shadow: 0 0 4px var(--danger-glow); }
+  50%       { box-shadow: 0 0 18px rgba(231,76,60,0.9); }
+}
+@keyframes pulseWarn {
+  0%, 100% { box-shadow: 0 0 4px rgba(243,156,18,0.4); }
+  50%       { box-shadow: 0 0 12px rgba(243,156,18,0.8); }
+}
+@keyframes pulseGreen {
+  0%, 100% { box-shadow: 0 0 4px var(--accent-glow); }
+  50%       { box-shadow: 0 0 16px rgba(126,204,73,0.6); }
 }
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes scanline {
+  0%   { background-position: 0 0; }
+  100% { background-position: 0 100%; }
+}
+@keyframes glowPulse {
+  0%, 100% { text-shadow: 0 0 6px currentColor; }
+  50%       { text-shadow: 0 0 18px currentColor, 0 0 30px currentColor; }
+}
 
-/* ── Chat messages ───────────────────────────────────────────────────────── */
-.chat-msg { padding: 1.5px 0; line-height: 1.45; word-break: break-word; font-size: 11px; }
-.chat-msg.bot      { color: #7ecc49; }
-.chat-msg.player   { color: #5da8e0; }
-.chat-msg.ai       { color: #9b59b6; }
-.chat-msg.system   { color: #555; font-style: italic; }
-.chat-msg.server   { color: #e67e22; }
-.chat-msg.survivor { color: #e74c3c; }
+/* ── Cyberpunk glow helpers ────────────────────────────────────────────── */
+.glow-green { text-shadow: 0 0 8px var(--accent), 0 0 16px var(--accent-glow); }
+.glow-red   { text-shadow: 0 0 8px var(--danger), 0 0 16px var(--danger-glow); }
+.glow-cyan  { text-shadow: 0 0 8px var(--cyan), 0 0 16px rgba(46,196,182,0.3); }
 
-/* ── Status dots ─────────────────────────────────────────────────────────── */
-.status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
-.status-dot.online     { background: #7ecc49; box-shadow: 0 0 6px rgba(126,204,73,0.65); }
-.status-dot.offline    { background: #333; }
-.status-dot.connecting { background: #f39c12; animation: pulse 1s infinite; }
+/* ── Top bar scanline effect ───────────────────────────────────────────── */
+.topbar-scanline::after {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+}
+
+/* ── Inventory grid ────────────────────────────────────────────────────── */
+.inv-slot {
+  position: relative;
+  width: 36px; height: 36px;
+  background: #1a1a1a;
+  border: 2px solid #444;
+  border-top-color: #666;
+  border-left-color: #666;
+  image-rendering: pixelated;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; box-sizing: border-box;
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s;
+  user-select: none;
+}
+.inv-slot:hover { border-color: rgba(126,204,73,0.5); }
+.inv-slot:active { background: rgba(126,204,73,0.08); }
+
+/* ── Tab active line ───────────────────────────────────────────────────── */
+.tab-active-green { border-bottom: 2px solid var(--accent); color: var(--accent) !important; }
+.tab-active-red   { border-bottom: 2px solid var(--danger); color: var(--danger) !important; }
+.tab-active-pvp   { border-bottom: 2px solid var(--pvp);    color: var(--pvp) !important; }
+.tab-active-cyan  { border-bottom: 2px solid var(--cyan);   color: var(--cyan) !important; }
+
+/* ── Section separator ─────────────────────────────────────────────────── */
+.section-divider {
+  border: none;
+  border-top: 1px solid rgba(40,55,80,0.5);
+  margin: 6px 0;
+}
 
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mono { font-family: "JetBrains Mono", monospace; }

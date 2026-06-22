@@ -44,13 +44,14 @@ interface AppState {
   pullProgresses: Record<string, PullProgress["progress"]>;
   globalPassword: string; globalProxy: string;
   groupChat: ChatMessage[];
-  activeTab: "bots" | "models" | "settings" | "coordinator" | "anarchy" | "farm";
+  activeTab: "bots" | "models" | "settings" | "coordinator" | "anarchy" | "farm" | "pvp";
 
   setOllamaStatus: (s: OllamaStatus) => void;
   setModels: (m: ModelInfo[]) => void;
   setInstalledModels: (m: InstalledModelInfo[]) => void;
   setSelectedBot: (id: string | null) => void;
   setActiveTab: (tab: AppState["activeTab"]) => void;
+  anarchyMode?: boolean;
   loadBots: () => Promise<void>;
   loadConfig: () => Promise<void>;
 

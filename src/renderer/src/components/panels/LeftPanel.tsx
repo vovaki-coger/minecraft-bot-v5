@@ -6,6 +6,7 @@ import SettingsTab from "../tabs/SettingsTab";
 import CoordinatorTab from "../tabs/CoordinatorTab";
 import AnarchyTab from "../tabs/AnarchyTab";
 import FarmTab from "../tabs/FarmTab";
+import PvpTab from "../tabs/PvpTab";
 import BotEditModal from "../BotEditModal";
 
 export default function LeftPanel() {
@@ -20,6 +21,7 @@ export default function LeftPanel() {
       case "coordinator": return <CoordinatorTab />;
       case "anarchy":     return <AnarchyTab />;
       case "farm":        return <FarmTab bot={selectedBot} />;
+      case "pvp":         return <PvpTab />;
       default:
         return (
           <div className="flex flex-col h-full overflow-hidden">

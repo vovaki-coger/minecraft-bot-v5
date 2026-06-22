@@ -7,37 +7,42 @@ export default function BotTabs() {
   const [showCreate, setShowCreate] = useState(false);
 
   const tabs = [
-    { id: "bots",        label: "Боты" },
-    { id: "farm",        label: "🌾 Ферма" },
-    { id: "models",      label: "Модели ИИ" },
-    { id: "anarchy",     label: "🏴‍☠️ Анархия" },
-    { id: "coordinator", label: "Координатор" },
-    { id: "settings",    label: "Настройки" },
+    { id: "bots",        label: "Боты",         color: "#7ecc49" },
+    { id: "farm",        label: "🌾 Ферма",      color: "#7ecc49" },
+    { id: "pvp",         label: "⚔️ PVP",        color: "#e74c3c" },
+    { id: "models",      label: "Модели ИИ",     color: "#7ecc49" },
+    { id: "anarchy",     label: "🏴‍☠️ Анархия",  color: "#e74c3c" },
+    { id: "coordinator", label: "Координатор",   color: "#7ecc49" },
+    { id: "settings",    label: "Настройки",     color: "#7ecc49" },
   ] as const;
 
   return (
     <div
       className="flex items-center border-b overflow-x-auto"
-      style={{ borderColor: "#3a3a3a", background: "rgba(20,20,20,0.9)", minHeight: 34 }}
+      style={{ borderColor: "rgba(40,55,80,0.5)", background: "rgba(8,12,18,0.95)", minHeight: 34 }}
     >
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          onClick={() => setActiveTab(tab.id as any)}
-          className="px-4 py-1.5 text-xs font-mono whitespace-nowrap transition-colors"
-          style={{
-            color: activeTab === tab.id
-              ? (tab.id === "anarchy" ? "#e74c3c" : tab.id === "farm" ? "#7ecc49" : "#7ecc49")
-              : "#888",
-            borderBottom: activeTab === tab.id
-              ? `2px solid ${tab.id === "anarchy" ? "#e74c3c" : "#7ecc49"}`
-              : "2px solid transparent",
-            background: "none", cursor: "pointer",
-          }}
-        >
-          {tab.label}
-        </button>
-      ))}
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab.id;
+        return (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className="px-4 py-1.5 text-xs font-mono whitespace-nowrap transition-colors"
+            style={{
+              color: isActive ? tab.color : "#444",
+              borderBottom: isActive
+                ? `2px solid ${tab.color}`
+                : "2px solid transparent",
+              background: "none",
+              cursor: "pointer",
+              textShadow: isActive ? `0 0 8px ${tab.color}80` : "none",
+              transition: "all 0.15s",
+            }}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
 
       <div className="flex-1" />
 
@@ -50,10 +55,12 @@ export default function BotTabs() {
                 onClick={() => setSelectedBot(bot.id)}
                 className="flex items-center gap-1.5 px-2 py-1 text-xs font-mono rounded whitespace-nowrap"
                 style={{
-                  background: selectedBotId === bot.id ? "#2a3a2a" : "transparent",
-                  color: selectedBotId === bot.id ? "#7ecc49" : "#888",
-                  border: `1px solid ${selectedBotId === bot.id ? "#5b8c3e" : "transparent"}`,
+                  background: selectedBotId === bot.id ? "rgba(126,204,73,0.08)" : "transparent",
+                  color: selectedBotId === bot.id ? "#7ecc49" : "#555",
+                  border: `1px solid ${selectedBotId === bot.id ? "rgba(126,204,73,0.4)" : "transparent"}`,
                   cursor: "pointer",
+                  boxShadow: selectedBotId === bot.id ? "0 0 8px rgba(126,204,73,0.1)" : "none",
+                  transition: "all 0.15s",
                 }}
               >
                 <span
@@ -61,8 +68,9 @@ export default function BotTabs() {
                   style={{
                     background:
                       bot.status === "online" ? "#7ecc49"
-                      : bot.status === "connecting" ? "#f1c40f"
-                      : "#555",
+                      : bot.status === "connecting" ? "#f39c12"
+                      : "#333",
+                    boxShadow: bot.status === "online" ? "0 0 6px rgba(126,204,73,0.6)" : "none",
                   }}
                 />
                 {bot.config.nick}

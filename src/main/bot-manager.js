@@ -26,6 +26,7 @@ const { AIBrain } = require("./ai-brain");
 const { AnarchyProtocol } = require("./anarchy-protocol");
 const { LobbyHandler } = require("./lobby-handler");
 const { AntiDetect } = require("./anti-detect");
+const { PvpController } = require("./pvp-controller");
 
 const RUSSIAN_OVERRIDE = `ВАЖНО: Ты общаешься НА РУССКОМ ЯЗЫКЕ. Все твои ответы должны быть на русском. `;
 
@@ -267,74 +268,11 @@ class BotManager {
       try { movements.maxDropDown = 3; } catch {}
       bot.pathfinder.setMovements(movements);
 
-      // ── Vanilla physics: velocity clamp (анти-чит) ───────────────────
-      {
-        const WALK_MAX = 0.215;
-        const TERM_VEL = 3.92;
-        const _tickHandler = () => {
-          if (!bot.entity) return;
-          const vel = bot.entity.velocity;
-          const hSq = vel.x * vel.x + vel.z * vel.z;
-          if (hSq > WALK_MAX * WALK_MAX) {
-            const scale = WALK_MAX / Math.sqrt(hSq);
-            vel.x *= scale; vel.z *= scale;
-          }
-          if (vel.y < -TERM_VEL) vel.y = -TERM_VEL;
-        };
-        bot.on('physicsTick', _tickHandler);
-        bot.once('end', () => { try { bot.removeListener('physicsTick', _tickHandler); } catch {} });
-      }
-
-      // ── onGround correction: исправляем флаг перед отправкой пакета ──
-      {
-        const _origWrite = bot._client.write.bind(bot._client);
-        bot._client.write = function(name, params) {
-          if ((name === 'position' || name === 'position_look') && params && bot.entity) {
-            try {
-              const below = bot.blockAt(bot.entity.position.offset(0, -0.1, 0));
-              const actualOnGround = below && below.boundingBox === 'block'
-                ? bot.entity.position.y - Math.floor(bot.entity.position.y) < 0.05
-                : false;
-              if (params.onGround && !actualOnGround && bot.entity.velocity.y < -0.1) {
-                params = { ...params, onGround: false };
-              }
-            } catch {}
-          }
-          return _origWrite(name, params);
-        };
-        bot.once('end', () => { try { bot._client.write = _origWrite; } catch {} });
-      }
-
-      // ── Плавный поворот головы: lerp ~25°/тик (анти-KillAura флаг) ──
-      {
-        const _origLookAt = bot.lookAt.bind(bot);
-        bot.lookAt = async function(point, force = false) {
-          if (!bot.entity || !point) return _origLookAt(point, force);
-          try {
-            const dx = point.x - bot.entity.position.x;
-            const dy = (point.y != null ? point.y : bot.entity.position.y + 1.62) - (bot.entity.position.y + 1.62);
-            const dz = point.z - bot.entity.position.z;
-            const tYaw   = Math.atan2(-dx, dz);
-            const tPitch = Math.atan2(-dy, Math.sqrt(dx*dx + dz*dz));
-            let dYaw = tYaw - bot.entity.yaw;
-            while (dYaw >  Math.PI) dYaw -= 2 * Math.PI;
-            while (dYaw < -Math.PI) dYaw += 2 * Math.PI;
-            const dPitch = tPitch - bot.entity.pitch;
-            const MAX_DEG = 0.44;
-            const steps = Math.ceil(Math.max(Math.abs(dYaw), Math.abs(dPitch)) / MAX_DEG);
-            if (steps <= 1 || force) return _origLookAt(point, force);
-            const startYaw = bot.entity.yaw, startPitch = bot.entity.pitch;
-            for (let i = 1; i <= steps; i++) {
-              if (!bot.entity) break;
-              const t = i / steps;
-              bot.entity.yaw   = startYaw   + dYaw   * t;
-              bot.entity.pitch = startPitch + dPitch * t;
-              await new Promise(r => setTimeout(r, 50));
-            }
-            return _origLookAt(point, true);
-          } catch { return _origLookAt(point, force); }
-        };
-      }
+      // ── AntiDetect v2: login packet masking + ground flag + velocity + lookAt ──
+      AntiDetect.patchLoginPackets(bot);
+      AntiDetect.patchGroundFlag(bot);
+      AntiDetect.patchVelocityClamp(bot);
+      AntiDetect.patchLookAt(bot);
 
       // ── forcedMove: сервер скорректировал позицию (античит/телепорт) ─
       // НЕ сбрасываем pathfinder — он пересчитает маршрут сам с новой точки.
@@ -1235,35 +1173,40 @@ class BotManager {
     return instance.taskManager.runTask(taskName, opts);
   }
 
-  // ── PvP ───────────────────────────────────────────────────────────────────
-  startPvpTask(botId, opts) {
-    const instance = this.bots.get(botId);
-    if (!instance?.taskManager) throw new Error('Бот не подключён');
-    return instance.taskManager.runTask('pvp_player', opts);
-  }
-
-  // ── PvP автоатака (непрерывный режим) ──────────────────────────────────
-  togglePvpMode(botId) {
+  // ── PvP (нейросеть PvpController) ────────────────────────────────────────
+  startPvpTask(botId, opts = {}) {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error('Бот не подключён');
-    if (instance._pvpLoopRunning) {
-      return this.stopPvpMode(botId);
-    }
-    this._startPvpLoop(botId);
+    if (instance._pvpController?.isRunning()) return { pvpMode: true };
+    instance._pvpController = new PvpController(instance, this.emit);
+    instance._pvpController.start(opts);
+    instance._pvpLoopRunning = true;
+    this.emit('bot:pvpToggled', { botId, pvpMode: true });
     return { pvpMode: true };
   }
 
   stopPvpMode(botId) {
     const instance = this.bots.get(botId);
     if (!instance) return { pvpMode: false };
+    instance._pvpController?.stop();
+    instance._pvpController = null;
     instance._pvpLoopRunning = false;
     if (instance._pvpLoopTimer) { clearTimeout(instance._pvpLoopTimer); instance._pvpLoopTimer = null; }
     try { if (instance.bot?.pvp) instance.bot.pvp.stop(); } catch {}
-    try { if (instance.taskManager) instance.taskManager._running = false; } catch {}
     this.emit('bot:pvpToggled', { botId, pvpMode: false });
     return { pvpMode: false };
   }
 
+  togglePvpMode(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance?.bot) throw new Error('Бот не подключён');
+    if (instance._pvpController?.isRunning()) {
+      return this.stopPvpMode(botId);
+    }
+    return this.startPvpTask(botId, {});
+  }
+
+  // ── Старый PVP-цикл (оставлен для совместимости) ──────────────────────
   _startPvpLoop(botId) {
     const instance = this.bots.get(botId);
     if (!instance?.bot) return;
