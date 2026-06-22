@@ -6,11 +6,12 @@ interface Props { bot: BotState; }
 // ── Minecraft-style textures ───────────────────────────────────────────────
 function getItemIconSources(name: string): string[] {
   const formatted = name.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join("_");
+  // texture:// — кастомный Electron-протокол, проксирует GitHub raw через net.fetch (обходит webSecurity)
   return [
-    `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.20.4/assets/minecraft/textures/item/${name}.png`,
-    `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.20.4/assets/minecraft/textures/block/${name}.png`,
-    `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.21/assets/minecraft/textures/item/${name}.png`,
-    `https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.21/assets/minecraft/textures/block/${name}.png`,
+    `texture://InventivetalentDev/minecraft-assets/1.20.4/assets/minecraft/textures/item/${name}.png`,
+    `texture://InventivetalentDev/minecraft-assets/1.20.4/assets/minecraft/textures/block/${name}.png`,
+    `texture://InventivetalentDev/minecraft-assets/1.21/assets/minecraft/textures/item/${name}.png`,
+    `texture://InventivetalentDev/minecraft-assets/1.21/assets/minecraft/textures/block/${name}.png`,
     `https://minecraft.wiki/images/Invicon_${formatted}.png`,
   ];
 }
@@ -195,11 +196,14 @@ export default function Inventory({ bot }: Props) {
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (!api?.on) return;
-    // Use existing bot:windowOpen / bot:windowClose events from mineflayer
-    const offOpen = api.on("bot:windowOpen", (data: { botId: string; title?: string; items?: InventoryItem[] }) => {
+    // bot:windowOpen шлёт { botId, window: { title, slots } }
+    const offOpen = api.on("bot:windowOpen", (data: { botId: string; window?: { title: string; slots: InventoryItem[] } }) => {
       if (data.botId !== bot.id) return;
-      setChestItems(data.items || []);
-      setChestTitle(data.title || "Контейнер");
+      const slots = data.window?.slots || [];
+      // Фильтруем пустые слоты (count=0 и нет имени)
+      const filled = slots.filter((s: InventoryItem) => s.count > 0 || s.name);
+      setChestItems(filled);
+      setChestTitle(data.window?.title || "Контейнер");
       setChestOpen(true);
     });
     const offClose = api.on("bot:windowClose", (data: { botId: string }) => {
@@ -207,7 +211,7 @@ export default function Inventory({ bot }: Props) {
       setChestOpen(false);
       setChestItems([]);
     });
-    // Also support new explicit chest events (from bot-manager patch)
+    // Явные события от bot-manager (closeBotWindow)
     const offChestOpen = api.on("bot:chestOpened", (data: { botId: string; title?: string; items?: InventoryItem[] }) => {
       if (data.botId !== bot.id) return;
       setChestItems(data.items || []);

@@ -1,4 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require("electron");
+
+// texture:// — регистрируем схему ДО app.whenReady (требование Electron)
+protocol.registerSchemesAsPrivileged([
+  { scheme: "texture", privileges: { secure: true, standard: true, supportFetchAPI: true, corsEnabled: false } },
+]);
 const path = require("path");
 const { OllamaManager } = require("./ollama-manager");
 const { BotManager } = require("./bot-manager");
@@ -33,7 +38,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, "../preload/index.js"),
-      webSecurity: !isDev,
+      webSecurity: false, // нужно для texture:// протокола и внешних текстур
     },
   });
 
@@ -152,6 +157,16 @@ function setupIpcHandlers() {
 }
 
 app.whenReady().then(async () => {
+  // texture:// — проксируем GitHub raw content через Electron net (без CORS)
+  protocol.handle("texture", async (request) => {
+    const ghUrl = "https://raw.githubusercontent.com/" + request.url.slice("texture://".length);
+    try {
+      return await net.fetch(ghUrl);
+    } catch {
+      return new Response(null, { status: 404 });
+    }
+  });
+
   await initialize();
   createWindow();
   app.on("activate", () => {

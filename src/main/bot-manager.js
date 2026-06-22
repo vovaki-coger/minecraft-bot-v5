@@ -1270,6 +1270,60 @@ class BotManager {
     instance._pvpLoopRunning = true;
     this.emit('bot:pvpToggled', { botId, pvpMode: true });
 
+    // ── Anti-cheat bypass helpers ─────────────────────────────────────────────
+
+    // 1. Плавный поворот к цели (не мгновенный snap — обходит RotationBot/NoRotate)
+    const smoothLookAt = async (bot, pos) => {
+      try {
+        if (!bot.entity?.position) return;
+        const dx = pos.x - bot.entity.position.x;
+        const dy = pos.y - (bot.entity.position.y + 1.62);
+        const dz = pos.z - bot.entity.position.z;
+        const targetYaw   = Math.atan2(-dx, -dz);
+        const targetPitch = Math.atan2(-dy, Math.sqrt(dx*dx + dz*dz));
+        const steps = 2 + Math.floor(Math.random() * 2); // 2-3 шага
+        const curYaw   = bot.entity.yaw;
+        const curPitch = bot.entity.pitch;
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          // Добавляем лёгкий шум (±0.02 рад) — имитирует дрожание мышью
+          const noise = () => (Math.random() - 0.5) * 0.04;
+          await bot.look(curYaw + (targetYaw - curYaw)*t + noise(),
+                         curPitch + (targetPitch - curPitch)*t + noise(), false).catch(() => {});
+          if (i < steps) await new Promise(r => setTimeout(r, 18 + Math.floor(Math.random()*14)));
+        }
+      } catch {}
+    };
+
+    // 2. W-tap: кратко отпускаем W (сбрасывает скорость — обходит Speed/Fly проверку)
+    const wTap = async (bot) => {
+      try {
+        bot.setControlState('forward', false);
+        await new Promise(r => setTimeout(r, 55 + Math.floor(Math.random()*35)));
+        bot.setControlState('forward', true);
+      } catch {}
+    };
+
+    // 3. Sprint-reset: выключаем спринт на 80-130ms после удара (сбрасывает sprint-hit флаг)
+    const sprintReset = async (bot) => {
+      try {
+        bot.setControlState('sprint', false);
+        await new Promise(r => setTimeout(r, 80 + Math.floor(Math.random()*50)));
+        bot.setControlState('sprint', true);
+      } catch {}
+    };
+
+    // 4. Stutter-step: делаем полшага назад-вперёд (обходит KillAura по паттерну движения)
+    const stutterStep = async (bot) => {
+      try {
+        bot.setControlState('back', true);
+        await new Promise(r => setTimeout(r, 40 + Math.floor(Math.random()*25)));
+        bot.setControlState('back', false);
+        bot.setControlState('forward', true);
+        await new Promise(r => setTimeout(r, 40));
+      } catch {}
+    };
+
     const loop = async () => {
       if (!instance._pvpLoopRunning || !instance.bot) return;
       try {
@@ -1278,7 +1332,10 @@ class BotManager {
         const myPos = bot.entity?.position;
         if (!myPos) { instance._pvpLoopTimer = setTimeout(loop, 1500); return; }
 
-        // Find nearest player
+        // Случайный стрейф влево/вправо (обходит статичный KillAura)
+        const strafeDir = Math.random() < 0.5 ? 'left' : 'right';
+        bot.setControlState(strafeDir, true);
+
         const target = Object.values(bot.entities || {})
           .filter(e =>
             e.type === 'player' &&
@@ -1291,29 +1348,71 @@ class BotManager {
 
         if (target) {
           const dist = target.position.distanceTo(myPos);
-          if (dist > 3.5) {
-            // Move closer using pathfinder
-            const { goals } = require('mineflayer-pathfinder');
-            bot.pathfinder?.goto(new goals.GoalFollow(target, 2)).catch(() => {});
+
+          // Идём к цели если далеко
+          if (dist > 3.0) {
+            bot.setControlState(strafeDir, false);
+            try {
+              const { goals } = require('mineflayer-pathfinder');
+              bot.pathfinder?.goto(new goals.GoalFollow(target, 2)).catch(() => {});
+            } catch {}
             instance._pvpLoopTimer = setTimeout(loop, 500);
             return;
           }
-          // Look at target
+
+          // Включаем спринт и движение вперёд
+          bot.setControlState('sprint', true);
+          bot.setControlState('forward', true);
+
+          // Плавный поворот к голове цели (нет мгновенного snap)
           const headPos = target.position.offset(0, (target.height ?? 1.8) * 0.85, 0);
-          await bot.lookAt(headPos, true).catch(() => {});
-          // Jump-crit 60%
-          if (Math.random() < 0.6 && !bot.entity?.isInWater) {
+          await smoothLookAt(bot, headPos);
+
+          // Jump-crit (55% шанс, только если на земле и не в воде)
+          if (Math.random() < 0.55 && !bot.entity?.isInWater && bot.entity?.onGround) {
             bot.setControlState('jump', true);
-            await new Promise(r => setTimeout(r, 50));
+            await new Promise(r => setTimeout(r, 42 + Math.floor(Math.random()*22)));
             bot.setControlState('jump', false);
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 130 + Math.floor(Math.random()*50)));
           }
-          if (target.isValid !== false) bot.attack(target);
+
+          // Удар только если цель ещё в досягаемости (<=3.1 блока — ванильный радиус)
+          const distNow = target.isValid !== false
+            ? target.position.distanceTo(bot.entity.position)
+            : 99;
+          if (distNow <= 3.1) {
+            bot.attack(target);
+
+            // После удара — случайные anti-cheat техники
+            const r = Math.random();
+            if (r < 0.30) await wTap(bot);             // 30% — W-tap
+            else if (r < 0.55) await sprintReset(bot); // 25% — sprint-reset
+            else if (r < 0.65) await stutterStep(bot); // 10% — stutter-step
+
+            // Переключаем стрейф на противоположный
+            bot.setControlState(strafeDir, false);
+            const altDir = strafeDir === 'left' ? 'right' : 'left';
+            bot.setControlState(altDir, true);
+            await new Promise(r => setTimeout(r, 90 + Math.floor(Math.random()*70)));
+            bot.setControlState(altDir, false);
+
+            // 8% — приседаем (confuses некоторые анти-читы)
+            if (Math.random() < 0.08) {
+              bot.setControlState('sneak', true);
+              await new Promise(r => setTimeout(r, 180 + Math.floor(Math.random()*220)));
+              bot.setControlState('sneak', false);
+            }
+          } else {
+            bot.setControlState(strafeDir, false);
+          }
+        } else {
+          bot.setControlState(strafeDir, false);
         }
-      } catch (err) { /* ignore */ }
+      } catch { /* ignore */ }
 
       if (instance._pvpLoopRunning) {
-        const delay = 420 + Math.floor(Math.random() * 230);
+        // Переменная задержка 350-700ms (имитирует человека, обходит таймер-паттерн)
+        const delay = 350 + Math.floor(Math.random() * 350);
         instance._pvpLoopTimer = setTimeout(loop, delay);
       }
     };
