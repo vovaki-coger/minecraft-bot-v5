@@ -241,14 +241,14 @@ this._combatLoop = setInterval(() => {
         // AntiDetect: FOV-проверка — не атакуем за спиной (KillAura флаг)
         if (!this._antiDetect.isInFov(target, 130)) {
           await this._antiDetect.smoothLookAt(
-            target.position.offset(0, (target.height || 1.8) * 0.6, 0), 3
+            target.position.offset(0, target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5, 0), 3
           );
           return; // атакуем в следующем тике
         }
 
         // AntiDetect: плавный поворот + рандомный pre-attack delay
         await this._antiDetect.smoothLookAt(
-          target.position.offset(0, (target.height || 1.8) * 0.6, 0), 4
+          target.position.offset(0, target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5, 0), 4
         );
 
         const now = Date.now();

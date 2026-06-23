@@ -153,7 +153,7 @@ class PvpController {
 
     try {
       this._findTarget();
-      this._scanNearby40();  // 40-блоков пассивное обнаружение
+      this._scanNearby80();  // 80-блоков пассивное обнаружение
 
       if (!this._target) {
         try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
@@ -195,6 +195,7 @@ class PvpController {
       await this._doMoveAndAttack(bot, dist);
 
       // 5. БАФ-ЗЕЛЬЕ раз в 30 сек
+      if (this._tickCount % 8 === 0)  await this._autoBuffPotions(bot);
       if (this._tickCount % 50 === 0) await this._tryBuffPotion(bot);
 
       // 6. ХИЛ-ЗЕЛЬЕ при HP < 10
@@ -244,10 +245,10 @@ class PvpController {
     }
 
     // ── ДВИЖЕНИЕ ─────────────────────────────────────────────────────
-    if (dist > 4.5) {
+    if (dist > 3.0) {
       try { bot.setControlState('forward', true);  } catch {}
       try { bot.setControlState('sprint',  true);  } catch {}
-      if (dist > 8) {
+      if (dist > 6) {
         try {
           const { goals } = require('mineflayer-pathfinder');
           bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), false);
@@ -258,7 +259,7 @@ class PvpController {
 
     try { bot.pathfinder?.stop(); } catch {}
 
-    if (dist > 2.5) {
+    if (dist > 1.8) {
       try { bot.setControlState('forward', true);  } catch {}
       try { bot.setControlState('sprint',  false); } catch {}
     } else {
@@ -275,8 +276,8 @@ class PvpController {
     const dz     = tpos.z - pos.z;
     const dist2d = Math.max(Math.sqrt(dx*dx + dz*dz), 0.01);
     const yaw    = Math.atan2(-dx, -dz);
-    // 0.5 * height = центр тела, более легитно чем 0.85 (голова)
-    const aimY   = tpos.y + (target.height || 1.8) * 0.5;
+    // Центр тела: 0.85м от ног (для 1.8м игрока = грудь), не голова
+    const aimY   = tpos.y + (target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5);
     const pitch  = -Math.atan2(aimY - (pos.y + 1.62), dist2d);
 
     // bot.look с force=true — мгновенный поворот, сервер получает корректный look ПЕРЕД attack
@@ -291,14 +292,19 @@ class PvpController {
       return;
     }
 
-    // ── КРИТ: каждый 3-й удар, только если на земле и близко ─────────
+    // ── КРИТ: каждый 3-й удар, бьём СТРОГО во время падения ─────────
     const doCrit = bot.entity.onGround && (this._hitCount % 3 === 0) && finalDist < 3.2;
     if (doCrit) {
       try { bot.setControlState('jump', true);  } catch {}
-      await sleep(85 + rand(0,15));
+      await sleep(80 + rand(0,15));
       try { bot.setControlState('jump', false); } catch {}
-      await sleep(230 + rand(0,40)); // ждём пика → начало падения
-
+      // Ждём пока bot.entity.velocity.y станет < 0 (начало падения)
+      let waitCrit = 0;
+      while (waitCrit < 450) {
+        const vy = bot.entity?.velocity?.y ?? 0;
+        if (vy < -0.01) break; // падаем → бьём
+        await sleep(20); waitCrit += 20;
+      }
       const afterDist = bot.entity.position.distanceTo(tpos);
       if (afterDist > 4.8) return;
     }
@@ -327,11 +333,12 @@ class PvpController {
 
   // ── HP-ЛОГИКА ЕДЫ ───────────────────────────────────────────────────
   _shouldEat(hp, food) {
-    if (hp <= 8) {
+    if (hp <= 10) {
       if (food >= 18) return "gapple";
       return "regular_then_gapple";
     }
-    if (hp <= 14 && food < 16) return "regular";
+    if (hp <= 16 && food < 18) return "gapple_if_have";
+    if (hp <= 16 && food < 16) return "regular";
     if (food < 14) return "regular";
     return null;
   }
@@ -343,8 +350,14 @@ class PvpController {
       try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
       await sleep(80 + rand(0, 60));
 
-      if (mode === "gapple") {
+      // Отбегаем пока едим
+      try { bot.setControlState("back", true); } catch {}
+      await sleep(100);
+      if (mode === "gapple" || mode === "gapple_if_have") {
         await this._eatBestGapple(bot);
+      } else if (mode === "gapple_if_have") {
+        const had = await this._eatBestGapple(bot);
+        if (!had) { const food = this._selectRegularFood(bot); if (food) await this._eatItem(bot, food); }
       } else if (mode === "regular_then_gapple") {
         const food = this._selectRegularFood(bot);
         if (food) await this._eatItem(bot, food);
@@ -354,6 +367,7 @@ class PvpController {
         const food = this._selectRegularFood(bot);
         if (food) await this._eatItem(bot, food);
       }
+      try { bot.setControlState("back", false); } catch {}
     } finally {
       this._isDoingAction = false;
       this._forceAttack = 5;
@@ -467,7 +481,7 @@ class PvpController {
     const { bot } = this.instance;
     if (!bot?.entity) { this._target = null; return; }
 
-    let closest = null, minDist = 16;
+    let closest = null, minDist = 80;
     for (const e of Object.values(bot.entities || {})) {
       if (!e?.position || e === bot.entity) continue;
       if (e.type !== "player" && e.type !== "mob") continue;
@@ -484,7 +498,7 @@ class PvpController {
   }
 
   // ── ПАССИВНОЕ ОБНАРУЖЕНИЕ 40 БЛОКОВ + ПОЛЕ ЗРЕНИЯ ────────────────
-  _scanNearby40() {
+  _scanNearby80() {
     const { bot } = this.instance;
     if (!bot?.entity || this._tickCount % 5 !== 0) return; // каждые 5 тиков
 
@@ -499,7 +513,7 @@ class PvpController {
       if (uname && uname === (bot.username || "").toLowerCase()) continue;
 
       const d = botPos.distanceTo(e.position);
-      if (d > 40) continue;
+      if (d > 80) continue;
 
       // Проверяем поле зрения (90° от направления взгляда)
       const dx = e.position.x - botPos.x;
