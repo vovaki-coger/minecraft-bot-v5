@@ -110,7 +110,7 @@ function ItemPicker({ onSelect, onClose }: ItemPickerProps) {
 }
 
 export default function SettingsTab() {
-  const { globalPassword, globalProxy, bots, selectedBotId } = useAppStore();
+  const { globalPassword, globalProxy, bots, selectedBotId , updateBotConfigInStore } = useAppStore();
   const bot = bots.find((b) => b.id === selectedBotId);
 
   const [password, setPassword] = useState(globalPassword || "");
@@ -176,6 +176,7 @@ export default function SettingsTab() {
     if (!bot) return;
     const lobbyConfig = { enabled: lobbyEnabled, mode: lobbyMode, rankSlot: parseInt(rankSlot) || 0, rankName, rankWindowTitle, npcMode };
     await window.electronAPI.bot.updateConfig(bot.id, { lobbyConfig });
+    updateBotConfigInStore(bot.id, { lobbyConfig });
     flash(setSaved);
   }
   async function handleSaveBlacklist() {

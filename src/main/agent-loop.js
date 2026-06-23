@@ -166,6 +166,16 @@ class AgentLoop {
   // ── Боевой цикл (260мс) ─────────────────────────────────────────────
 
   _startCombatLoop() {
+    // Инициализируем Movements с allowSprinting для Ollama
+    try {
+      const { Movements } = require("mineflayer-pathfinder");
+      const mv = new Movements(this.bot);
+      mv.allowSprinting   = true;
+      mv.canDig           = false;
+      mv.allow1by1towers  = false;
+      mv.allowParkour     = true;
+      this.bot.pathfinder.setMovements(mv);
+    } catch {}
     this._combatLoop = setInterval(() => {
       this._combatTick().catch(() => {});
     }, 260);
@@ -174,6 +184,8 @@ class AgentLoop {
   async _combatTick() {
     const bot = this.bot;
     if (!bot?.entity || !this._active) return;
+    // Не конфликтуем с PVP-контроллером
+    if (this.instance._pvpController?.isRunning?.()) return;
 
     // AntiDetect: нокбек-пауза
     if (Date.now() < this._knockbackPauseUntil) return;
@@ -207,15 +219,15 @@ class AgentLoop {
 
     try {
       if (dist > 3.2) {
-        // Спринт при преследовании: кратковременно включаем для скорости,
-        // но сразу выключаем чтобы не флагать анти-чит постоянным спринтом
+        // Спринт при преследовании: держим постоянно когда есть цель
         try {
           const mv = bot.pathfinder.movements;
           if (mv && !mv.allowSprinting) {
             mv.allowSprinting = true;
-            setTimeout(() => { try { if (mv) mv.allowSprinting = false; } catch {} }, 1200);
           }
         } catch {}
+        // Также включаем direct sprint control для быстрого старта
+        try { bot.setControlState('sprint', true); } catch {}
 
         // AntiDetect: не перезапускаем pathfinder если цель не ушла далеко
         const moved = !this._moveTargetPos ||

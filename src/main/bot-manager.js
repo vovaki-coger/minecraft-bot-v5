@@ -1207,7 +1207,7 @@ class BotManager {
   }
 
   // ── PvP (нейросеть PvpController) ────────────────────────────────────────
-  startPvpTask(botId, opts = {}) {
+  async startPvpTask(botId, opts = {}) {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error('Бот не подключён');
     if (instance._pvpController?.isRunning()) return { pvpMode: true };

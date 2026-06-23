@@ -1,5 +1,5 @@
 /**
- * PvpBrain v4 — нейросеть PVP, 10000+ обучающих сценариев (генерация)
+ * PvpBrain v5 — нейросеть PVP, 100000+ обучающих сценариев (генерация)
  *
  * Архитектура: brain.js NeuralNetwork 12→24→18→12→7
  * Входной вектор (12 признаков):
@@ -405,6 +405,156 @@ function buildSeedData() {
     }
   }
 
+
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 8: 20к — ХОДЬБА / ПРИБЛИЖЕНИЕ К ЦЕЛИ
+  // ═══════════════════════════════════════════════════════════════════
+  for (let i = 0; i < 20000; i++) {
+    const dist   = 0.28 + Math.random() * 0.72;   // 0.28-1.0 (далеко)
+    const bHp    = 0.3  + Math.random() * 0.7;
+    const tHp    = 0.3  + Math.random() * 0.7;
+    const hunger = 0.5  + Math.random() * 0.5;
+    const sword  = Math.random() > 0.3 ? 1 : 0;
+    const cd     = Math.random();
+    const ally   = Math.random() * 0.4;
+    const enemy  = Math.random() * 0.3;
+    const hpDiff = clamp((bHp - tHp) / 2 + 0.5, 0, 1);
+    // Идём к цели — strafe доминирует
+    const strafe = clamp(0.85 + dist * 0.1 - bHp * 0.05, 0.7, 1.0);
+    const attack = dist < 0.32 && cd > 0.8 ? cd * 0.6 : 0;
+    data.push({ input: [dist,bHp,tHp,hpDiff,hunger,sword,0,0,0,cd,ally,enemy],
+                output: [attack,0,0,0,0,0,strafe] });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 9: 10к — ОТСТУПЛЕНИЕ / RETREAT
+  // ═══════════════════════════════════════════════════════════════════
+  for (let i = 0; i < 10000; i++) {
+    const dist   = Math.random() * 0.5;            // близко
+    const bHp    = Math.random() * 0.3;            // 0-0.3 (критический)
+    const tHp    = 0.3 + Math.random() * 0.7;
+    const hunger = Math.random() * 0.6;
+    const hasHeal = Math.random() > 0.5 ? 1 : 0;
+    const hasFood = Math.random() > 0.4 ? 1 : 0;
+    const enemy  = 0.2 + Math.random() * 0.8;
+    const hpDiff = clamp((bHp - tHp) / 2 + 0.5, 0, 1);
+    const retreat = clamp(0.6 + (0.3 - bHp) * 2 + enemy * 0.3, 0.5, 1.0);
+    const heal    = bHp < 0.15 && hasHeal ? clamp(0.9 - bHp * 2, 0.6, 0.95) : 0;
+    const eat     = bHp >= 0.15 && hasFood && hunger < 0.5 ? 0.4 : 0;
+    data.push({ input: [dist,bHp,tHp,hpDiff,hunger,0,hasFood,hasHeal,0,0.7,0,enemy],
+                output: [0,retreat,eat,heal,0,0,0.05] });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 10: 10к — ПОГОНЯ (chasе) — враг убегает
+  // ═══════════════════════════════════════════════════════════════════
+  for (let i = 0; i < 10000; i++) {
+    const dist   = 0.20 + Math.random() * 0.60;   // 0.2-0.8 (убегающий враг)
+    const bHp    = 0.35 + Math.random() * 0.65;   // достаточно HP для погони
+    const tHp    = Math.random() * 0.4;            // враг слабый — убегает
+    const hunger = 0.6  + Math.random() * 0.4;    // сытый — может бежать
+    const sword  = 1;
+    const cd     = Math.random();
+    const hpDiff = clamp((bHp - tHp) / 2 + 0.5, 0, 1);
+    // Агрессивное преследование: strafe=1, attack когда близко+cd ready
+    const strafe = clamp(0.7 + dist * 0.25, 0.7, 1.0);
+    const attack = dist < 0.25 && cd > 0.75 ? cd * 0.9 : 0;
+    data.push({ input: [dist,bHp,tHp,hpDiff,hunger,sword,0,0,0,cd,0,0.1],
+                output: [attack,0,0,0,0,0,strafe] });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 11: 10к — ЗЕЛЬЯ (POTIONS) — когда применять
+  // ═══════════════════════════════════════════════════════════════════
+  for (let i = 0; i < 10000; i++) {
+    const dist    = 0.05 + Math.random() * 0.35;
+    const bHp     = Math.random();
+    const tHp     = 0.3  + Math.random() * 0.7;
+    const hasHeal = 1;
+    const hasBuff = Math.random() > 0.5 ? 1 : 0;
+    const hunger  = 0.6  + Math.random() * 0.4;
+    const hpDiff  = clamp((bHp - tHp) / 2 + 0.5, 0, 1);
+    let throwHeal = 0, throwPotion = 0, throwPerk = 0, attack = 0;
+    if (bHp < 0.2) {
+      // Критически мало HP — хилка в приоритете
+      throwHeal = clamp(0.85 + (0.2 - bHp) * 2, 0.7, 0.98);
+    } else if (bHp < 0.4) {
+      // Средне мало — хилка или отступаем
+      throwHeal = clamp(0.5 + (0.4 - bHp) * 1.5, 0.4, 0.75);
+    } else if (hasBuff && bHp > 0.6) {
+      // Хорошее HP + буф — применяем буф перед боем
+      throwPerk = clamp(0.7 + bHp * 0.2, 0.65, 0.92);
+      attack    = dist < 0.2 ? 0.5 : 0;
+    } else if (bHp > 0.5 && dist < 0.25) {
+      // Атакуем если нет нужды в зелье
+      attack = 0.75;
+    }
+    // Дебаф зелье: когда враг здоров + у нас нет хилки
+    if (tHp > 0.7 && bHp > 0.5 && !throwHeal) {
+      throwPotion = 0.5;
+      attack      = 0.4;
+    }
+    data.push({ input: [dist,bHp,tHp,hpDiff,hunger,1,0,hasHeal,hasBuff,0.8,0,0.2],
+                output: [attack,bHp<0.2?0.2:0,0,throwHeal,throwPotion,throwPerk,0.05] });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // БЛОК 12: 50к — ПВП-БОЙ (случайные боевые сценарии)
+  // ═══════════════════════════════════════════════════════════════════
+  for (let i = 0; i < 50000; i++) {
+    const dist   = Math.random();
+    const bHp    = Math.random();
+    const tHp    = Math.random();
+    const hunger = Math.random();
+    const sword  = Math.random() > 0.2 ? 1 : 0;
+    const food   = Math.random() > 0.4 ? 1 : 0;
+    const heal   = Math.random() > 0.5 ? 1 : 0;
+    const buff   = Math.random() > 0.6 ? 1 : 0;
+    const cd     = Math.random();
+    const ally   = Math.random() * 0.6;
+    const enemy  = Math.random() * 0.6;
+    const hpDiff = clamp((bHp - tHp) / 2 + 0.5, 0, 1);
+
+    // Лейблирование по чётким правилам
+    let attack = 0, retreat = 0, eat = 0, throwHeal = 0, throwPotion = 0, throwPerk = 0, strafe = 0;
+
+    if (bHp < 0.1) {
+      // Умираем — только спасаться
+      retreat   = 0.9;
+      throwHeal = heal ? 0.85 : 0;
+    } else if (bHp < 0.25 && heal) {
+      // Мало HP + хилка — лечимся
+      throwHeal = clamp(0.75 + (0.25 - bHp) * 2, 0.6, 0.9);
+      retreat   = clamp(0.3 + (0.25 - bHp), 0.2, 0.5);
+    } else if (bHp < 0.4 && food && hunger < 0.5) {
+      // Средне мало HP + голоден
+      eat     = clamp(0.65 + (0.4 - bHp), 0.5, 0.85);
+      retreat = bHp < 0.25 ? 0.3 : 0;
+    } else if (dist < 0.30 && cd > 0.75 && sword) {
+      // Близко + кулдаун готов + меч → АТАКА
+      const finishing = tHp < 0.15;
+      attack  = finishing ? 1.0 : clamp(cd * 0.9 + (1 - dist) * 0.1, 0.6, 0.98);
+      strafe  = dist < 0.15 ? 0.05 : 0.15;
+    } else if (dist > 0.35) {
+      // Далеко — сближаемся
+      strafe  = clamp(0.75 + dist * 0.15, 0.7, 0.95);
+      attack  = dist < 0.4 && cd > 0.85 ? 0.3 : 0;
+    } else {
+      // Средняя дистанция + кулдаун не готов
+      strafe  = clamp((1 - cd) * 0.7 + 0.2, 0.3, 0.85);
+      attack  = cd > 0.6 ? cd * 0.5 : 0;
+      if (buff && bHp > 0.65) { throwPerk = 0.55; }
+    }
+
+    // Модификаторы союзников — агрессивнее
+    if (ally > 0.3) { attack = clamp(attack * 1.2, 0, 1); retreat = retreat * 0.6; }
+    // Модификаторы врагов — осторожнее
+    if (enemy > 0.5 && bHp < 0.5) { retreat = clamp(retreat + enemy * 0.2, 0, 0.95); }
+
+    data.push({ input: [dist,bHp,tHp,hpDiff,hunger,sword,food,heal,buff,cd,ally,enemy],
+                output: [attack,retreat,eat,throwHeal,throwPotion,throwPerk,strafe].map(v=>clamp(v,0,1)) });
+  }
+
   log.info(`[PvpBrain] Сгенерировано ${data.length} обучающих сценариев`);
   return data;
 }
@@ -443,7 +593,7 @@ class PvpBrain {
     const data = buildSeedData();
     try {
       this.net.train(data, {
-        iterations:    16000,
+        iterations:    20000,
         errorThresh:   0.003,
         logPeriod:     4000,
         log: (s) => log.info("[PvpBrain] train:", s),
