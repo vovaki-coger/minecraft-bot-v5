@@ -6,6 +6,7 @@ const POTION_TYPES = [
   { id: "regeneration",  label: "💚 Регенерация",    color: "#2ecc71" },
   { id: "strength",      label: "💪 Сила",           color: "#8e44ad" },
   { id: "speed",         label: "⚡ Скорость",       color: "#3498db" },
+  { id: "fire_resistance",label:"🔥 Огнестойкость",  color: "#e67e22" },
   { id: "poison",        label: "☠️ Яд (дебаф)",     color: "#27ae60" },
   { id: "weakness",      label: "💔 Слабость (деб.)", color: "#7f8c8d" },
   { id: "slowness",      label: "🐌 Медлительность",  color: "#566573" },
@@ -26,8 +27,8 @@ interface ServerProfile {
   label: string;
   emoji: string;
   desc: string;
-  gappleCooldown: number;          // обычный golden_apple, сек
-  enchantedGappleCooldown: number; // enchanted_golden_apple, сек
+  gappleCooldown: number;
+  enchantedGappleCooldown: number;
   pearlCooldown: number;
   attackRange: number;
   color: string;
@@ -81,7 +82,10 @@ const SERVER_PROFILES: ServerProfile[] = [
 ];
 
 export default function PvpTab() {
-  const { bots, selectedBotId } = useAppStore();
+  // ── Получаем updateBotConfigInStore для синхронизации store после save ──
+  const bots = useAppStore(s => s.bots);
+  const selectedBotId = useAppStore(s => s.selectedBotId);
+  const updateBotConfigInStore = useAppStore(s => s.updateBotConfigInStore);
   const bot = bots.find(b => b.id === selectedBotId) || null;
 
   const [teammates, setTeammates]         = useState<string[]>([]);
@@ -94,7 +98,6 @@ export default function PvpTab() {
   const [pvpActive, setPvpActive]         = useState(false);
   const [saved, setSaved]                 = useState(false);
 
-  // Профиль и кулдауны
   const [serverProfile, setServerProfile]                     = useState<string>("custom");
   const [gappleCooldown, setGappleCooldown]                   = useState(30);
   const [enchantedGappleCooldown, setEnchantedGappleCooldown] = useState(120);
@@ -102,10 +105,13 @@ export default function PvpTab() {
 
   const activeProfile = SERVER_PROFILES.find(p => p.id === serverProfile) || SERVER_PROFILES[3];
 
+  // ── Читаем из store ТОЛЬКО при смене бота (bot?.id) ──────────────────
+  // После save — store обновляется через updateBotConfigInStore,
+  // поэтому при возврате на вкладку useEffect увидит актуальные данные
   useEffect(() => {
     if (!bot) return;
     const cfg = bot.config as any;
-    setTeammates(cfg.teammates || []);
+    setTeammates(Array.isArray(cfg.teammates) ? cfg.teammates : []);
     setCustomPotions(cfg.pvpCustomPotions || []);
     setAutoTarget(cfg.pvpAutoTarget !== false);
     setAttackRange(cfg.pvpAttackRange || 4.5);
@@ -115,6 +121,11 @@ export default function PvpTab() {
     setEnchantedGappleCooldown(cfg.pvpEnchantedGappleCooldown ?? 120);
     setPearlCooldown(cfg.pvpPearlCooldown ?? 16);
   }, [bot?.id]);
+
+  // Синхронизируем pvpActive при изменении pvpMode в store
+  useEffect(() => {
+    if (bot) setPvpActive((bot as any).pvpMode || false);
+  }, [(bot as any)?.pvpMode]);
 
   function applyProfile(profile: ServerProfile) {
     setServerProfile(profile.id);
@@ -133,7 +144,6 @@ export default function PvpTab() {
 
   function addPotion() {
     if (!newPotion.potionType) return;
-    const pt = POTION_TYPES.find(p => p.id === newPotion.potionType);
     const isDebuff = ["poison","weakness","slowness","blindness","instant_damage"].includes(newPotion.potionType || "");
     const potion: CustomPotion = {
       id: Date.now().toString(),
@@ -149,17 +159,22 @@ export default function PvpTab() {
 
   async function handleSave() {
     if (!bot) return;
+    const patch = {
+      teammates,
+      pvpCustomPotions:           customPotions,
+      pvpAutoTarget:              autoTarget,
+      pvpAttackRange:             attackRange,
+      pvpServerProfile:           serverProfile,
+      pvpGappleCooldown:          gappleCooldown,
+      pvpEnchantedGappleCooldown: enchantedGappleCooldown,
+      pvpPearlCooldown:           pearlCooldown,
+    };
     try {
-      await (window as any).electronAPI.bot.updateConfig(bot.id, {
-        teammates,
-        pvpCustomPotions:           customPotions,
-        pvpAutoTarget:              autoTarget,
-        pvpAttackRange:             attackRange,
-        pvpServerProfile:           serverProfile,
-        pvpGappleCooldown:          gappleCooldown,
-        pvpEnchantedGappleCooldown: enchantedGappleCooldown,
-        pvpPearlCooldown:           pearlCooldown,
-      });
+      await (window as any).electronAPI.bot.updateConfig(bot.id, patch);
+      // ── КЛЮЧЕВОЙ ФИС: обновляем Zustand store сразу ─────────────────
+      // Без этого при переходе на другую вкладку и обратно
+      // useEffect читал бы старый bot.config из store
+      updateBotConfigInStore(bot.id, patch);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -215,11 +230,11 @@ export default function PvpTab() {
       <div className="px-3 py-2 border-b flex items-center justify-between"
         style={{ borderColor: "rgba(231,76,60,0.3)", background: "rgba(10,12,18,0.85)" }}>
         <span className="font-mono text-xs font-bold" style={{ color: "#e74c3c", textShadow: "0 0 10px rgba(231,76,60,0.5)" }}>
-          ⚔️ PVP-нейросеть
+          ⚔️ PVP-нейросеть v5
         </span>
         {bot && (
           <span className="text-xs font-mono" style={{ color: pvpActive ? "#e74c3c" : "#555" }}>
-            {pvpActive ? "● медл.+крит" : "○ неактивен"}
+            {pvpActive ? "● крит+спринт" : "○ неактивен"}
           </span>
         )}
       </div>
@@ -240,7 +255,7 @@ export default function PvpTab() {
             transition: "all 0.2s",
             opacity: (!bot || bot.status !== "online") ? 0.4 : 1,
           }}>
-          {pvpActive ? "⏹ ОСТАНОВИТЬ PVP" : "▶ ЗАПУСТИТЬ PVP (медл.+крит)"}
+          {pvpActive ? "⏹ ОСТАНОВИТЬ PVP" : "▶ ЗАПУСТИТЬ PVP (крит+спринт)"}
         </button>
 
         {/* ── СЕРВЕРНЫЙ ПРОФИЛЬ ──────────────────────────────────────── */}
@@ -268,9 +283,8 @@ export default function PvpTab() {
             {activeProfile.desc}
           </div>
 
-          {/* Кулдауны яблок — ОБА */}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {/* Обычный golden_apple */}
+            {/* Golden Apple */}
             <div style={{ background: "rgba(126,204,73,0.05)", border: "1px solid rgba(126,204,73,0.2)", borderRadius: 5, padding: "8px 10px" }}>
               <div style={{ color: "#666", fontSize: 10, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
                 <span>🍏 Golden Apple КД:</span>
@@ -283,7 +297,7 @@ export default function PvpTab() {
                 style={{ width: "100%", accentColor: "#7ecc49" }} />
               <div style={{ color: "#444", fontSize: 9, marginTop: 2 }}>SpookyTime=30с · FunTime=30с · RealWorld=120с</div>
             </div>
-            {/* Enchanted golden_apple */}
+            {/* Enchanted Golden Apple */}
             <div style={{ background: "rgba(243,156,18,0.05)", border: "1px solid rgba(243,156,18,0.2)", borderRadius: 5, padding: "8px 10px" }}>
               <div style={{ color: "#666", fontSize: 10, marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
                 <span>✨ Enchanted Golden Apple КД:</span>
@@ -294,7 +308,7 @@ export default function PvpTab() {
               <input type="range" min={0} max={300} step={5} value={enchantedGappleCooldown}
                 onChange={e => setEnchantedGappleCooldown(+e.target.value)}
                 style={{ width: "100%", accentColor: "#f39c12" }} />
-              <div style={{ color: "#444", fontSize: 9, marginTop: 2 }}>SpookyTime=150с · FunTime/RealWorld=120с · ваниль=120с</div>
+              <div style={{ color: "#444", fontSize: 9, marginTop: 2 }}>SpookyTime=150с · FunTime/RealWorld=120с</div>
             </div>
             {/* Жемчуг */}
             <div>
@@ -315,10 +329,10 @@ export default function PvpTab() {
             🍖 Логика еды по HP (авто)
           </div>
           <div style={{ fontSize: 10, color: "#888", fontFamily: "monospace", lineHeight: 1.8 }}>
-            <div>HP ≥ 15 или HP 8-14 + голод:  <span style={{ color: "#bbb" }}>🥕 морковь → 🥩 мясо → 🍞 хлеб</span></div>
-            <div>HP ≤ 8 + еда полная (≥18):     <span style={{ color: "#7ecc49" }}>🍏 gapple сразу</span></div>
-            <div>HP ≤ 8 + еда не полная:        <span style={{ color: "#f39c12" }}>🥩 мясо → потом 🍏 gapple</span></div>
-            <div>HP ≤ 4 (экстренное):           <span style={{ color: "#e74c3c" }}>✨ enchanted gapple / хилка</span></div>
+            <div>HP ≥ 15 или HP 8-14 + голод: <span style={{ color: "#bbb" }}>🥕 морковь → 🥩 мясо → 🍞 хлеб</span></div>
+            <div>HP ≤ 8 + еда полная (≥18):    <span style={{ color: "#7ecc49" }}>🍏 gapple сразу</span></div>
+            <div>HP ≤ 8 + еда не полная:       <span style={{ color: "#f39c12" }}>🥩 мясо → потом 🍏 gapple</span></div>
+            <div>HP ≤ 4 (экстренное):          <span style={{ color: "#e74c3c" }}>✨ enchanted gapple / хилка</span></div>
           </div>
         </div>
 
@@ -339,9 +353,11 @@ export default function PvpTab() {
                 onChange={e => setAttackRange(parseFloat(e.target.value))}
                 style={{ width: "100%", accentColor: "#e74c3c" }} />
             </div>
-            {/* Инфо: режим всегда медл.+крит */}
             <div style={{ background: "rgba(231,76,60,0.05)", border: "1px solid rgba(231,76,60,0.2)", borderRadius: 5, padding: "6px 10px", fontSize: 10, color: "#888", fontFamily: "monospace" }}>
-              <span style={{ color: "#e74c3c" }}>⚡ Режим атаки:</span> Медленное PVP + критические удары (прыжок каждые 2 удара)
+              <span style={{ color: "#e74c3c" }}>⚡ Режим:</span> Крит (прыжок@360мс) + спринт (Ctrl+W)
+            </div>
+            <div style={{ background: "rgba(52,152,219,0.05)", border: "1px solid rgba(52,152,219,0.2)", borderRadius: 5, padding: "6px 10px", fontSize: 10, color: "#888", fontFamily: "monospace" }}>
+              <span style={{ color: "#3498db" }}>🤝 Ollama:</span> ИИ автоматически ставится на паузу пока PVP активен
             </div>
           </div>
         </div>
@@ -457,23 +473,9 @@ export default function PvpTab() {
           <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10.5, color: "#666", fontFamily: "monospace" }}>
             <div>Архитектура: <span style={{ color: "#7ecc49" }}>12→24→18→12→7</span></div>
             <div>Сценариев обучения: <span style={{ color: "#aaa" }}>10 000+</span></div>
-            <div>Режим: <span style={{ color: "#e74c3c" }}>⚡ Медл. PVP + 💥 критические удары</span></div>
-            <div style={{ borderTop: "1px solid #222", paddingTop: 6, marginTop: 3 }}>
-              {[
-                ["⚔️ attack",      "Атаковать (медленно + крит)"],
-                ["🏃 retreat",     "Отступить от опасности"],
-                ["🍖 eat",         "Есть по HP-приоритету"],
-                ["❤️ throwHeal",   "Хилку под себя"],
-                ["💥 throwPotion", "Яд/слабость на врага"],
-                ["✨ throwPerk",   "Сила/скорость на себя"],
-                ["🌀 strafe",      "Сближение с целью"],
-              ].map(([act, desc]) => (
-                <div key={act} style={{ display: "flex", gap: 8, color: "#555", marginBottom: 2 }}>
-                  <span style={{ color: "#7ecc49", minWidth: 95 }}>{act}</span>
-                  <span>{desc}</span>
-                </div>
-              ))}
-            </div>
+            <div>Режим: <span style={{ color: "#e74c3c" }}>💥 Крит@360мс + 🏃 Спринт + 🎯 прицел в грудь</span></div>
+            <div>Ollama конфликт: <span style={{ color: "#3498db" }}>✅ исправлен — авто-пауза</span></div>
+            <div>Сохранение: <span style={{ color: "#7ecc49" }}>✅ исправлено — store синхронизирован</span></div>
           </div>
         </div>
 
