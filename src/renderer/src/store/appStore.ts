@@ -22,6 +22,8 @@ export interface BotState {
     autoRegister: boolean; apiKey?: string; apiProvider?: string;
     lobbyConfig?: { enabled: boolean; mode: string; rankSlot: number; rankName: string; npcMode: boolean; rankWindowTitle: string; };
     teammates?: string[];
+    // PVP поля — хранятся в config, не типизированы строго
+    [key: string]: any;
   };
   status: "offline" | "connecting" | "online";
   stats: BotStats;
@@ -54,6 +56,9 @@ interface AppState {
   anarchyMode?: boolean;
   loadBots: () => Promise<void>;
   loadConfig: () => Promise<void>;
+
+  // ── Обновление конфига бота в памяти (без перезагрузки) ────────────
+  updateBotConfigInStore: (botId: string, patch: Record<string, any>) => void;
 
   onBotCreated: (d: BotState) => void;
   onBotDeleted: (d: { botId: string }) => void;
@@ -108,6 +113,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const pw = await window.electronAPI.config.getGlobalPassword();
     set({ globalPassword: pw, globalProxy: cfg.globalProxy || "" });
   },
+
+  // ── Обновление config бота прямо в store (без reload) ──────────────
+  // Вызывается после успешного updateConfig IPC чтобы store был актуальным
+  updateBotConfigInStore: (botId, patch) =>
+    set((s) => ({
+      bots: updateBot(s.bots, botId, (b) => ({
+        ...b,
+        config: { ...b.config, ...patch },
+      })),
+    })),
 
   onBotCreated: (d) => set((s) => ({
     bots: [...s.bots, { ...d, aiChatHistory: [], pvpMode: false }],
