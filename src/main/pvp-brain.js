@@ -1,5 +1,5 @@
 /**
- * PvpBrain v5 — нейросеть PVP, 100000+ обучающих сценариев (генерация)
+ * PvpBrain v3 — нейросеть PVP, 1 266 000+ обучающих сценариев (766k + 500k v3.0.1)
  *
  * Архитектура: brain.js NeuralNetwork 12→24→18→12→7
  * Входной вектор (12 признаков):
@@ -694,6 +694,124 @@ function buildSeedData() {
     else                                             { str=0.55; atk=cd>0.65?cd*0.4:0; }
     if (ally>0.5)                                   { atk=clamp(atk*1.15,0,1); }
     label([dist,bHp,tHp,hpDiff,hunger,sword,food,hasHeal,hasBuff,cd,ally,enemy], atk,ret,eat,heal,pot,perk,str);
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════
+  // +500 000 СЦЕНАРИЕВ v3.0.1
+  // ═══════════════════════════════════════════════════════════════
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК G: 100 000 — ходьба + поворот головы
+  // Закрепляем: когда далеко — двигаться (strafe=1), атака=0
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0.30, 1.0);  // средняя и дальняя дистанция
+    const bHp    = rnd(0.3, 1.0);
+    const tHp    = rnd(0.2, 1.0);
+    const hunger = rnd(0.5, 1.0);
+    const cd     = rnd(0.0, 1.0);
+    const hpDiff = clamp((bHp-tHp)/2+0.5, 0, 1);
+    // Далеко → бежим (strafe=1), голову смотрим вперёд — atk=0
+    const str = clamp(0.90 + dist * 0.08, 0.85, 1.0);
+    const atk = (dist < 0.35 && cd > 0.8) ? 0.25 : 0;
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.5),rnd(0,0.3)], atk,0,0,0,0,0,str);
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК H: 100 000 — ближний бой 1-2 блока (CQC)
+  // Бот должен атаковать на 2-3 блоках, не только вплотную
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0.05, 0.30);  // 0.5-3 блока
+    const bHp    = rnd(0.3, 1.0);
+    const tHp    = rnd(0.1, 1.0);
+    const hunger = rnd(0.5, 1.0);
+    const cd     = rnd(0.5, 1.0);    // CD готов/почти
+    const hpDiff = clamp((bHp-tHp)/2+0.5, 0, 1);
+    // На дистанции 1-3 блока с готовым CD → АТАКА
+    const cdReady = cd > 0.72;
+    const atk = cdReady ? clamp(cd * 0.95 * (1 - dist * 0.5), 0.65, 0.98) : cd * 0.3;
+    const str = cdReady ? 0.05 : 0.35;  // не бегать во время удара
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.4),rnd(0,0.3)], atk,0,0,0,0,0,str);
+    // Вариант: враг убегает (dist растёт) — атаковать пока в reach
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,0,0.1], atk,0,0,0,0,0,clamp(str+0.1,0,1));
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК I: 100 000 — взрывные/дебаф зелья на врага
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0.03, 0.60);  // в радиусе броска
+    const bHp    = rnd(0.2, 1.0);
+    const tHp    = rnd(0.2, 1.0);
+    const hunger = rnd(0.5, 1.0);
+    const cd     = rnd(0.0, 1.0);
+    const hasBuff = 1;               // есть зелье
+    const hpDiff = clamp((bHp-tHp)/2+0.5, 0, 1);
+    let atk=0,pot=0,perk=0,str=0;
+    if (dist < 0.5 && cd < 0.6 && bHp > 0.4) {
+      // CD не готов, близко — бросаем зелье
+      pot  = clamp(0.80 - dist * 0.5, 0.5, 0.85);
+      perk = bHp > 0.7 ? 0.5 : 0;
+      str  = 0.15;
+    } else if (dist < 0.30 && cd > 0.72) {
+      // CD готов + близко — атакуем
+      atk  = clamp(cd * 0.9, 0.65, 0.97);
+      str  = 0.05;
+    } else {
+      str  = clamp(0.7 + dist * 0.2, 0.65, 0.95);
+      pot  = dist < 0.5 && cd < 0.5 ? 0.4 : 0;
+    }
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,0,hasBuff,cd,rnd(0,0.4),rnd(0,0.3)], atk,0,0,0,pot,perk,str);
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК J: 100 000 — крит-удары (высокий урон при низком HP врага)
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0.05, 0.25);  // ближний бой
+    const bHp    = rnd(0.4, 1.0);    // мы живые
+    const tHp    = rnd(0.05, 0.50);  // враг слабый → добиваем
+    const hunger = rnd(0.5, 1.0);
+    const cd     = rnd(0.7, 1.0);    // CD готов
+    const hpDiff = clamp((bHp-tHp)/2+0.5, 0, 1);
+    // Низкий HP врага + CD готов + близко → максимальная атака
+    const finishing = tHp < 0.15;
+    const atk = finishing ? 1.0 : clamp(cd * 0.95 + (1-tHp) * 0.05, 0.75, 0.99);
+    const str = 0.02;  // почти не стрейфить при добивании
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.4),rnd(0,0.2)], atk,0,0,0,0,0,str);
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК K: 100 000 — защита + отступление + лечение
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0.0, 0.8);
+    const bHp    = rnd(0.0, 0.35);  // низкое HP
+    const tHp    = rnd(0.2, 1.0);
+    const hunger = rnd(0.2, 0.6);   // голодный
+    const cd     = rnd(0.0, 1.0);
+    const food   = Math.random() > 0.3 ? 1 : 0;
+    const hasHeal= Math.random() > 0.4 ? 1 : 0;
+    const hpDiff = clamp((bHp-tHp)/2+0.5, 0, 1);
+    let ret=0,eat=0,heal=0,str=0;
+    if (bHp < 0.08) {
+      ret  = 0.95;
+      heal = hasHeal ? 0.90 : 0;
+      eat  = !hasHeal && food ? 0.7 : 0;
+    } else if (bHp < 0.20 && hasHeal) {
+      heal = clamp(0.80 + (0.20-bHp)*2, 0.65, 0.92);
+      ret  = 0.50;
+    } else if (bHp < 0.30 && food && hunger < 0.5) {
+      eat  = clamp(0.70 + (0.30-bHp)*1.5, 0.55, 0.88);
+      ret  = 0.35;
+    } else {
+      // Среднее HP — отступаем, не атакуем
+      ret  = clamp(0.40 + (0.35-bHp)*2, 0.25, 0.75);
+      str  = clamp(0.50 - ret*0.3, 0.15, 0.55);
+    }
+    label([dist,bHp,tHp,hpDiff,hunger,1,food,hasHeal,0,cd,rnd(0,0.4),rnd(0,0.4)], 0,ret,eat,heal,0,0,str);
   }
 
   log.info(`[PvpBrain] Сгенерировано ${data.length} обучающих сценариев`);

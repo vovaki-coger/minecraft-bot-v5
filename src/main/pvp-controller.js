@@ -221,48 +221,50 @@ class PvpController {
     this._scheduleTick(nextDelay);
   }
 
-  // ── ДВИЖЕНИЕ + АТАКА (CD-aware, W-tap, щит+топор) ──────────────────
+  // ── ДВИЖЕНИЕ + АТАКА (v3.0.1 — полный рефакт) ──────────────────────
   async _doMoveAndAttack(bot, dist) {
-    if (this._isDoingAction) return; // доп. защита от гонки еда↔оружие
+    if (this._isDoingAction) return;
     const target = this._target;
     if (!target?.position || !bot.entity) return;
 
     const pos  = bot.entity.position;
     const tpos = target.position;
 
-    // ── Щит в руке врага → топор ─────────────────────────────────────
+    // ── Прицел вычисляем ПЕРВЫМ (чтобы yaw был доступен для look при движении)
+    const dx     = tpos.x - pos.x;
+    const dz     = tpos.z - pos.z;
+    const dist2d = Math.max(Math.sqrt(dx*dx + dz*dz), 0.01);
+    const yaw    = Math.atan2(-dx, -dz);   // направление к цели
+    const aimY   = tpos.y + (target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5);
+    const pitch  = -Math.atan2(aimY - (pos.y + 1.62), dist2d);
+
+    // ── Оружие ───────────────────────────────────────────────────────
     const eq = target.equipment || [];
     const enemyHasShield = [eq[0], eq[1]].some(i => i?.name?.includes('shield'));
-
     const items  = bot.inventory.items();
     const sword  = items.find(i => SWORD_NAMES.some(n => i.name.includes(n)));
     const axe    = items.find(i => AXE_NAMES.some(n  => i.name.includes(n)));
     const totem  = items.find(i => i.name === 'totem_of_undying');
     const weapon = (enemyHasShield && axe) ? axe : (sword || axe);
-    // CD: меч 625мс (1.6/s), топор 1000мс (1.0/s)
     const weaponCD = (weapon && AXE_NAMES.some(n => weapon.name.includes(n))) ? 975 : 600;
 
-    // Тотем в оффхэнд при низком HP
-    const myHp = bot.health ?? 20;
-    if (myHp <= 5 && totem) {
-      const offhand = bot.inventory.items().find(i => i.name === 'totem_of_undying');
-      if (offhand) { try { await bot.equip(offhand, 'off-hand'); } catch {} }
+    // Тотем в оффхэнд при HP ≤ 5
+    if ((bot.health ?? 20) <= 5 && totem) {
+      try { await bot.equip(totem, 'off-hand'); } catch {}
     }
 
-    if (weapon && bot.heldItem?.name !== weapon.name) {
-      try { await bot.equip(weapon, 'hand'); await sleep(45 + rand(0,20)); } catch {}
-    }
-
-    // ── ДВИЖЕНИЕ ─────────────────────────────────────────────────────
-    // Закрываем инвентарь/сундук если открыт
+    // ── Закрываем инвентарь/сундук ───────────────────────────────────
     try { if (bot.currentWindow) bot.closeWindow(bot.currentWindow); } catch {}
 
+    // ── ДВИЖЕНИЕ ─────────────────────────────────────────────────────
     if (dist > 3.0) {
-      // Смотрим в сторону цели во время бега (иначе бот "смотрит в небо")
+      // FIX: смотрим к цели (yaw объявлен выше — нет ошибки)
       try { await bot.look(yaw, 0, false); } catch {}
+      // FIX: останавливаем pathfinder когда близко (< 5 блоков), иначе конфликт
+      if (dist < 5) { try { bot.pathfinder?.stop(); } catch {} }
       try { bot.setControlState('forward', true);  } catch {}
       try { bot.setControlState('sprint',  true);  } catch {}
-      if (dist > 6) {
+      if (dist >= 5) {
         try {
           const { goals } = require('mineflayer-pathfinder');
           bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), false);
@@ -281,55 +283,42 @@ class PvpController {
       try { bot.setControlState('sprint',  false); } catch {}
     }
 
-    // ── ПРОВЕРЯЕМ КД АТАКИ (главный фикс от автоклик-бана) ───────────
-    const now = Date.now();
-    if (now - this._lastAttackMs < weaponCD) return; // CD не готов — тихо пропускаем
+    // Берём оружие (только когда dist <= 3.0, не во время бега)
+    if (weapon && bot.heldItem?.name !== weapon.name) {
+      try { await bot.equip(weapon, 'hand'); await sleep(45 + rand(0,20)); } catch {}
+    }
 
-    // ── ПРИЦЕЛ НА ЦЕНТР ХИТБОКСА (не выше головы) ───────────────────
-    const dx     = tpos.x - pos.x;
-    const dz     = tpos.z - pos.z;
-    const dist2d = Math.max(Math.sqrt(dx*dx + dz*dz), 0.01);
-    const yaw    = Math.atan2(-dx, -dz);
-    // Центр тела: 0.85м от ног (для 1.8м игрока = грудь), не голова
-    const aimY   = tpos.y + (target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5);
-    const pitch  = -Math.atan2(aimY - (pos.y + 1.62), dist2d);
+    // ── КД АТАКИ ─────────────────────────────────────────────────────
+    if (Date.now() - this._lastAttackMs < weaponCD) return;
 
-    // bot.look с force=true — мгновенный поворот, сервер получает корректный look ПЕРЕД attack
+    // ── ПРИЦЕЛ + LOOK ─────────────────────────────────────────────────
     try { await bot.look(yaw, pitch, true); } catch {}
-    // Человеческая реакция между прицелом и ударом (40-80ms)
     await sleep(40 + rand(0, 40));
 
-    // ── ФИНАЛЬНАЯ ПРОВЕРКА ДИСТАНЦИИ ─────────────────────────────────
+    // ── ФИНАЛЬНАЯ ДИСТАНЦИЯ (vanilla reach = 3.0 блока) ──────────────
     const finalDist = bot.entity.position.distanceTo(tpos);
-    if (finalDist > 4.8) {
+    if (finalDist > 3.5) {
       try { bot.setControlState('forward', true); } catch {}
       return;
     }
 
-    // ── КРИТ: каждый 3-й удар, бьём СТРОГО во время падения ─────────
-    const doCrit = bot.entity.onGround && (this._hitCount % 3 === 0) && finalDist < 3.2;
+    // ── КРИТ: каждый 3-й удар, атака ВО ВРЕМЯ ПАДЕНИЯ ───────────────
+    const doCrit = bot.entity.onGround && (this._hitCount % 3 === 0) && finalDist < 3.0;
     if (doCrit) {
-      try { bot.setControlState('jump', true);  } catch {}
-      await sleep(80 + rand(0,15));
+      try { bot.setControlState('jump', true); } catch {}
+      // Ждём пока реально прыгнем (onGround → false)
+      let waited = 0;
+      while (bot.entity.onGround && waited < 250) { await sleep(20); waited += 20; }
       try { bot.setControlState('jump', false); } catch {}
-      // Ждём пока bot.entity.velocity.y станет < 0 (начало падения)
-      let waitCrit = 0;
-      while (waitCrit < 450) {
-        const vy = bot.entity?.velocity?.y ?? 0;
-        if (vy < -0.01) break; // падаем → бьём
-        await sleep(20); waitCrit += 20;
-      }
-      // ← Пересчитываем прицел с новой позиции бота (он поднялся)
-      const cPos = bot.entity.position;
-      const cdx = tpos.x - cPos.x, cdz = tpos.z - cPos.z;
-      const cd2d = Math.max(Math.sqrt(cdx*cdx + cdz*cdz), 0.01);
-      const cYaw = Math.atan2(-cdx, -cdz);
-      const cAimY = tpos.y + (target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5);
-      const cPitch = -Math.atan2(cAimY - (cPos.y + 1.62), cd2d);
-      try { await bot.look(cYaw, cPitch, true); } catch {}
-      await sleep(25);
-      const afterDist = bot.entity.position.distanceTo(tpos);
-      if (afterDist > 4.8) return;
+      // Ждём ~280мс от отрыва — это пик+начало падения
+      await sleep(280 + rand(0, 40));
+      // Пересчитываем прицел с ТЕКУЩЕЙ позиции (бот выше)
+      const cp = bot.entity.position;
+      const ndx = tpos.x - cp.x, ndz = tpos.z - cp.z;
+      const nd2d = Math.max(Math.sqrt(ndx*ndx + ndz*ndz), 0.01);
+      try { await bot.look(Math.atan2(-ndx,-ndz), -Math.atan2(aimY-(cp.y+1.62), nd2d), true); } catch {}
+      await sleep(20);
+      if (bot.entity.position.distanceTo(tpos) > 3.5) return;
     }
 
     // ── АТАКА ────────────────────────────────────────────────────────
@@ -338,9 +327,8 @@ class PvpController {
       this._lastAttackMs = Date.now();
       this._attackCount++;
       this._hitCount++;
-      if (doCrit) { this._critCount++; log.debug('[PvpController] 💥 КРИТ #' + this._critCount); }
-
-      // ── W-TAP: release W 50-80мс (KB separation, легитно) ─────────
+      if (doCrit) { this._critCount++; log.debug('[PvpController] 💥 КРИТ'); }
+      // W-TAP
       try { bot.setControlState('forward', false); } catch {}
       await sleep(50 + rand(0, 30));
       if (this._running && this._target) {
@@ -350,8 +338,7 @@ class PvpController {
     } catch (err) {
       log.debug('[PvpController] attack:', err.message);
     }
-
-    if (doCrit) { await sleep(180 + rand(0,40)); } // ждём приземления
+    if (doCrit) { await sleep(200 + rand(0,40)); }
   }
 
   // ── HP-ЛОГИКА ЕДЫ ───────────────────────────────────────────────────
