@@ -1,6 +1,6 @@
 {
   "name": "@workspace/minecraft-bot-v5",
-  "version": "5.6.0",
+  "version": "5.6.1",
   "description": "PrizmarinBot v5 — AntiDetect, LobbyHandler, AI-мозг",
   "main": "src/main/index.js",
   "private": true,

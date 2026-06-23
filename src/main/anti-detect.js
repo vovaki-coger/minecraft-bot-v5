@@ -232,7 +232,7 @@ class AntiDetect {
         const dx = point.x - bot.entity.position.x;
         const dy = (point.y ?? bot.entity.position.y + 1.62) - (bot.entity.position.y + 1.62);
         const dz = point.z - bot.entity.position.z;
-        const tYaw   = Math.atan2(-dx, dz);
+        const tYaw   = Math.atan2(-dx, -dz);
         const tPitch = Math.atan2(-dy, Math.sqrt(dx*dx + dz*dz));
         let dYaw = tYaw - bot.entity.yaw;
         while (dYaw >  Math.PI) dYaw -= 2 * Math.PI;

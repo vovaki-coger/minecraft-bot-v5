@@ -166,17 +166,7 @@ class AgentLoop {
   // ── Боевой цикл (260мс) ─────────────────────────────────────────────
 
   _startCombatLoop() {
-    // Инициализируем Movements с allowSprinting для Ollama
-    try {
-      const { Movements } = require("mineflayer-pathfinder");
-      const mv = new Movements(this.bot);
-      mv.allowSprinting   = true;
-      mv.canDig           = false;
-      mv.allow1by1towers  = false;
-      mv.allowParkour     = true;
-      this.bot.pathfinder.setMovements(mv);
-    } catch {}
-    this._combatLoop = setInterval(() => {
+this._combatLoop = setInterval(() => {
       this._combatTick().catch(() => {});
     }, 260);
   }
@@ -219,15 +209,8 @@ class AgentLoop {
 
     try {
       if (dist > 3.2) {
-        // Спринт при преследовании: держим постоянно когда есть цель
-        try {
-          const mv = bot.pathfinder.movements;
-          if (mv && !mv.allowSprinting) {
-            mv.allowSprinting = true;
-          }
-        } catch {}
-        // Также включаем direct sprint control для быстрого старта
-        try { bot.setControlState('sprint', true); } catch {}
+        // Спринт: allowSprinting=false (GrimAC Invalid Move fix, см. anti-detect.js)
+
 
         // AntiDetect: не перезапускаем pathfinder если цель не ушла далеко
         const moved = !this._moveTargetPos ||
@@ -249,14 +232,14 @@ class AgentLoop {
         // AntiDetect: FOV-проверка — не атакуем за спиной (KillAura флаг)
         if (!this._antiDetect.isInFov(target, 130)) {
           await this._antiDetect.smoothLookAt(
-            target.position.offset(0, (target.height ?? 1.8) * 0.85, 0), 3
+            target.position.offset(0, (target.height || 1.8) * 0.6, 0), 3
           );
           return; // атакуем в следующем тике
         }
 
         // AntiDetect: плавный поворот + рандомный pre-attack delay
         await this._antiDetect.smoothLookAt(
-          target.position.offset(0, (target.height ?? 1.8) * 0.85, 0), 4
+          target.position.offset(0, (target.height || 1.8) * 0.6, 0), 4
         );
 
         const now = Date.now();
