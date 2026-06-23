@@ -555,6 +555,147 @@ function buildSeedData() {
                 output: [attack,retreat,eat,throwHeal,throwPotion,throwPerk,strafe].map(v=>clamp(v,0,1)) });
   }
 
+
+  // ═══════════════════════════════════════════════════════════════
+  // +666 000 ДОПОЛНИТЕЛЬНЫХ СЦЕНАРИЕВ
+  // ═══════════════════════════════════════════════════════════════
+
+  // Вспомогательные функции
+  const rnd    = (a,b) => a + Math.random()*(b-a);
+  const pick   = arr => arr[Math.floor(Math.random()*arr.length)];
+  const label  = (input, atk,ret,eat,heal,pot,perk,str) =>
+    data.push({ input, output:[atk,ret,eat,heal,pot,perk,str].map(v=>clamp(v,0,1)) });
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК A: 200 000 — универсальные PVP (полное покрытие пространства)
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 200000; i++) {
+    const dist=rnd(0,1), bHp=rnd(0,1), tHp=rnd(0,1), hunger=rnd(0,1);
+    const sword=pick([0,1]), food=pick([0,1]), hasHeal=pick([0,1]);
+    const hasBuff=pick([0,1]), cd=rnd(0,1), ally=rnd(0,0.6), enemy=rnd(0,0.6);
+    const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
+    let atk=0,ret=0,eat=0,heal=0,pot=0,perk=0,str=0;
+    if (bHp<0.1)                                    { ret=0.9; heal=hasHeal?0.85:0; }
+    else if (bHp<0.25&&hasHeal)                     { heal=clamp(0.75+(0.25-bHp)*2,0.6,0.9); ret=0.3; }
+    else if (bHp<0.4&&food&&hunger<0.5)             { eat=clamp(0.65+(0.4-bHp),0.5,0.85); }
+    else if (dist<0.30&&cd>0.75&&sword)             { atk=clamp(cd*0.9+(1-dist)*0.1,0.6,0.98); str=0.1; }
+    else if (dist>0.35)                             { str=clamp(0.75+dist*0.15,0.7,0.95); atk=dist<0.4&&cd>0.85?0.3:0; }
+    else                                            { str=clamp((1-cd)*0.7+0.2,0.3,0.85); atk=cd>0.6?cd*0.5:0; }
+    if (hasBuff&&bHp>0.65&&!heal)                   { perk=0.55; }
+    if (ally>0.3)                                   { atk=clamp(atk*1.2,0,1); ret*=0.6; }
+    if (enemy>0.5&&bHp<0.5)                         { ret=clamp(ret+enemy*0.2,0,0.95); }
+    label([dist,bHp,tHp,hpDiff,hunger,sword,food,hasHeal,hasBuff,cd,ally,enemy],atk,ret,eat,heal,pot,perk,str);
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК B: 100 000 — W-TAP паттерны (release W + удар + re-press)
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0.05,0.30);  // ближний бой
+    const bHp    = rnd(0.3,1.0);
+    const tHp    = rnd(0.1,1.0);
+    const hunger = rnd(0.5,1.0);
+    const cd     = rnd(0.8,1.0);    // CD почти/полностью готов
+    const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+    // W-tap: атакуем когда cd готов, затем strafe=0 (отпускаем W на 50ms)
+    const atk = clamp(cd*0.92, 0.7, 0.98);
+    const str = cd<0.85 ? 0.3 : 0.05; // минимальный strafe при атаке
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,0,0.1], atk,0,0,0,0,0,str);
+    // Вариант с союзником — ещё агрессивнее
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0.3,0.8),0.1], clamp(atk*1.1,0,1),0,0,0,0,0,0.02);
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК C: 100 000 — щит + топор (axe-shield break combo)
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0.05,0.35);
+    const bHp    = rnd(0.3,1.0);
+    const tHp    = rnd(0.4,1.0);  // враг со щитом живой
+    const hunger = rnd(0.6,1.0);
+    const cd     = rnd(0.0,1.0);
+    const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+    // Враг со щитом = нужно сломать: atk высокий (топор), no retreat
+    // После слома щита (simulate) можно бить с мечом
+    const shieldBroken = Math.random() > 0.5; // 50% — щит уже сломан
+    if (!shieldBroken) {
+      // Ломаем щит: атакуем топором (atk), без спешки
+      const atk = cd>0.95 ? 0.9 : (cd>0.7 ? 0.5 : 0.1);
+      label([dist,bHp,tHp,hpDiff,hunger,0,0,0,0,cd,0,0.2], atk,0,0,0,0,0,clamp(1-atk,0.1,0.8));
+    } else {
+      // Щит сломан: бьём мечом полноценно
+      const atk = cd>0.75&&dist<0.25 ? clamp(cd*0.95,0.7,0.98) : 0;
+      const str = atk>0.7 ? 0.05 : 0.85;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,0,0.1], atk,0,0,0,0,0,str);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК D: 100 000 — тотем (totem of undying) сценарии
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0,1);
+    const bHp    = rnd(0,1);
+    const tHp    = rnd(0,0.15);  // враг почти мёртв — может быть тотем
+    const hunger = rnd(0.5,1.0);
+    const hasHeal= Math.random()>0.5 ? 1 : 0;
+    const cd     = rnd(0,1);
+    const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+    // Если враг на низком HP — продолжаем атаку (тотем спасёт его, но мы не отступаем)
+    let atk=0,ret=0,str=0,heal=0;
+    if (bHp<0.1)                { ret=0.9; heal=hasHeal?0.85:0; }
+    else if (dist>0.35)         { str=clamp(0.8+dist*0.15,0.75,0.95); }
+    else if (cd>0.75&&dist<0.3) { atk=clamp(cd*0.95,0.75,1.0); str=0.05; }
+    else                        { str=clamp((1-cd)*0.6+0.3,0.3,0.85); atk=cd*0.4; }
+    // Добиваем врага с тотемом: burst attack
+    if (tHp<0.08 && cd>0.7 && dist<0.3) { atk=1.0; str=0; }
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,hasHeal,0,cd,0,0.1], atk,ret,0,heal,0,0,str);
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК E: 100 000 — стрейф + позиционирование
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 100000; i++) {
+    const dist   = rnd(0.05,0.60);
+    const bHp    = rnd(0.15,1.0);
+    const tHp    = rnd(0.15,1.0);
+    const hunger = rnd(0.4,1.0);
+    const cd     = rnd(0,1);
+    const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+    const str    = clamp(0.3+(1-cd)*0.5+(dist>0.3?0.2:0),0.2,0.95);
+    const atk    = cd>0.78&&dist<0.28 ? clamp(cd*0.88,0.6,0.96) : clamp(cd*0.3,0,0.4);
+    label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.5),rnd(0,0.4)], atk,0,0,0,0,0,str);
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // БЛОК F: 66 000 — кристалл + специальные сценарии
+  // ──────────────────────────────────────────────────────────────
+  for (let i = 0; i < 66000; i++) {
+    // Хаотичный бой: несколько врагов, разное HP, зелья и союзники
+    const dist   = Math.random();
+    const bHp    = Math.random();
+    const tHp    = Math.random();
+    const hunger = rnd(0.3,1.0);
+    const sword  = pick([0,1]);
+    const food   = pick([0,1]);
+    const hasHeal= pick([0,1]);
+    const hasBuff= pick([0,1]);
+    const cd     = Math.random();
+    const ally   = rnd(0,0.8);
+    const enemy  = rnd(0.2,1.0);  // несколько врагов
+    const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+    // С несколькими врагами — осторожнее, зелья важны
+    let atk=0,ret=0,eat=0,heal=0,pot=0,perk=0,str=0;
+    if (bHp<0.12)                                   { ret=0.92; heal=hasHeal?0.88:0; }
+    else if (enemy>0.6&&bHp<0.4)                    { ret=clamp(0.5+enemy*0.3,0.4,0.9); eat=food&&hunger<0.4?0.3:0; }
+    else if (dist<0.28&&cd>0.72&&sword&&enemy<0.4)  { atk=clamp(cd*0.9,0.65,0.97); str=0.1; }
+    else if (hasBuff&&bHp>0.7&&!heal)               { perk=0.7; atk=dist<0.25?0.4:0; }
+    else if (dist>0.3)                              { str=clamp(0.7+dist*0.2,0.65,0.95); }
+    else                                             { str=0.55; atk=cd>0.65?cd*0.4:0; }
+    if (ally>0.5)                                   { atk=clamp(atk*1.15,0,1); }
+    label([dist,bHp,tHp,hpDiff,hunger,sword,food,hasHeal,hasBuff,cd,ally,enemy], atk,ret,eat,heal,pot,perk,str);
+  }
+
   log.info(`[PvpBrain] Сгенерировано ${data.length} обучающих сценариев`);
   return data;
 }
@@ -593,7 +734,7 @@ class PvpBrain {
     const data = buildSeedData();
     try {
       this.net.train(data, {
-        iterations:    20000,
+        iterations:    25000,
         errorThresh:   0.003,
         logPeriod:     4000,
         log: (s) => log.info("[PvpBrain] train:", s),

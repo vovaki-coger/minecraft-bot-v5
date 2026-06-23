@@ -49,6 +49,7 @@ class PvpController {
     this._tickCount     = 0;
     this._hitCount      = 0;
     this._critCount     = 0;
+    this._lastAttackMs  = 0;   // трекер CD атаки
     this._forceAttack   = 0;     // тиков принудительной атаки
     this._isDoingAction = false;
     this._lastHealthCheck = 0;
@@ -211,106 +212,117 @@ class PvpController {
     this._scheduleTick(nextDelay);
   }
 
-  // ── ДВИЖЕНИЕ + КРИТ-АТАКА ───────────────────────────────────────────
+  // ── ДВИЖЕНИЕ + АТАКА (CD-aware, W-tap, щит+топор) ──────────────────
   async _doMoveAndAttack(bot, dist) {
     const target = this._target;
-    if (!target || !bot.entity) return;
+    if (!target?.position || !bot.entity) return;
 
     const pos  = bot.entity.position;
     const tpos = target.position;
-    const dx   = tpos.x - pos.x;
-    const dz   = tpos.z - pos.z;
-    const dist2d = Math.max(Math.sqrt(dx*dx + dz*dz), 0.01);
-    const yaw    = Math.atan2(-dx, -dz);
 
-    // ── Прицел на ГРУДЬ (y+0.9), а не голову — фикс промахов ────────
-    // Если враг ниже — прицеливаемся в центр тела
-    const targetBodyY = tpos.y + 0.9;
-    const eyeY = pos.y + 1.62;
-    const pitch = -Math.atan2(targetBodyY - eyeY, dist2d);
+    // ── Щит в руке врага → топор ─────────────────────────────────────
+    const eq = target.equipment || [];
+    const enemyHasShield = [eq[0], eq[1]].some(i => i?.name?.includes('shield'));
 
-    // Смотрим на цель
-    try { await bot.look(yaw, pitch, false); } catch {}
+    const items  = bot.inventory.items();
+    const sword  = items.find(i => SWORD_NAMES.some(n => i.name.includes(n)));
+    const axe    = items.find(i => AXE_NAMES.some(n  => i.name.includes(n)));
+    const totem  = items.find(i => i.name === 'totem_of_undying');
+    const weapon = (enemyHasShield && axe) ? axe : (sword || axe);
+    // CD: меч 625мс (1.6/s), топор 1000мс (1.0/s)
+    const weaponCD = (weapon && AXE_NAMES.some(n => weapon.name.includes(n))) ? 975 : 600;
 
-    // ── Экипируем оружие ─────────────────────────────────────────────
-    const weapon = bot.inventory.items().find(i =>
-      SWORD_NAMES.some(n => i.name.includes(n)) || AXE_NAMES.some(n => i.name.includes(n))
-    );
+    // Тотем в оффхэнд при низком HP
+    const myHp = bot.health ?? 20;
+    if (myHp <= 5 && totem) {
+      const offhand = bot.inventory.items().find(i => i.name === 'totem_of_undying');
+      if (offhand) { try { await bot.equip(offhand, 'off-hand'); } catch {} }
+    }
+
     if (weapon && bot.heldItem?.name !== weapon.name) {
-      try { await bot.equip(weapon, "hand"); } catch {}
+      try { await bot.equip(weapon, 'hand'); await sleep(45 + rand(0,20)); } catch {}
     }
 
     // ── ДВИЖЕНИЕ ─────────────────────────────────────────────────────
     if (dist > 4.5) {
-      // Бежим к цели со спринтом
-      try { bot.setControlState("forward", true); } catch {}
-      try { bot.setControlState("sprint",  true); } catch {}  // Ctrl+W
-      // Если цель далеко (> 8 блоков) и убегает — pathfinder поможет
+      try { bot.setControlState('forward', true);  } catch {}
+      try { bot.setControlState('sprint',  true);  } catch {}
       if (dist > 8) {
         try {
-          const { goals } = require("mineflayer-pathfinder");
-          bot.pathfinder.setGoal(
-            new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), false
-          );
+          const { goals } = require('mineflayer-pathfinder');
+          bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), false);
         } catch {}
       }
       return;
     }
 
-    // В радиусе атаки — стоп pathfinder, прямое управление
     try { bot.pathfinder?.stop(); } catch {}
 
     if (dist > 2.5) {
-      // Медленно сближаемся, без спринта
-      try { bot.setControlState("forward", true);  } catch {}
-      try { bot.setControlState("sprint",  false); } catch {}
+      try { bot.setControlState('forward', true);  } catch {}
+      try { bot.setControlState('sprint',  false); } catch {}
     } else {
-      // Вплотную — стоп
-      try { bot.setControlState("forward", false); } catch {}
-      try { bot.setControlState("sprint",  false); } catch {}
+      try { bot.setControlState('forward', false); } catch {}
+      try { bot.setControlState('sprint',  false); } catch {}
     }
 
-    // ── КРИТИЧЕСКИЙ УДАР ─────────────────────────────────────────────
-    // Алгоритм: прыжок → 360мс → атака в начале падения (crit в MC)
-    const distNow = bot.entity.position.distanceTo(tpos);
-    if (distNow > 4.8) return; // слишком далеко, не атакуем
+    // ── ПРОВЕРЯЕМ КД АТАКИ (главный фикс от автоклик-бана) ───────────
+    const now = Date.now();
+    if (now - this._lastAttackMs < weaponCD) return; // CD не готов — тихо пропускаем
 
-    const shouldCrit = bot.entity.onGround && (this._hitCount % 2 === 0);
+    // ── ПРИЦЕЛ НА ЦЕНТР ХИТБОКСА (не выше головы) ───────────────────
+    const dx     = tpos.x - pos.x;
+    const dz     = tpos.z - pos.z;
+    const dist2d = Math.max(Math.sqrt(dx*dx + dz*dz), 0.01);
+    const yaw    = Math.atan2(-dx, -dz);
+    // 0.5 * height = центр тела, более легитно чем 0.85 (голова)
+    const aimY   = tpos.y + (target.height || 1.8) * 0.5;
+    const pitch  = -Math.atan2(aimY - (pos.y + 1.62), dist2d);
 
-    if (shouldCrit) {
-      // Прыжок
-      try { bot.setControlState("jump", true); } catch {}
-      await sleep(CRIT_JUMP_PRESS);        // 90мс — нажимаем прыжок
-      try { bot.setControlState("jump", false); } catch {}
-      await sleep(CRIT_WAIT_PEAK);         // 260мс — ждём вершины → начало падения
-      // Теперь бот падает → атака = КРИТИЧЕСКИЙ УДАР (1.5x урон)
-    }
+    // bot.look с force=true — мгновенный поворот, сервер получает корректный look ПЕРЕД attack
+    try { await bot.look(yaw, pitch, true); } catch {}
+    // Человеческая реакция между прицелом и ударом (40-80ms)
+    await sleep(40 + rand(0, 40));
 
-    // Финальная проверка дистанции
+    // ── ФИНАЛЬНАЯ ПРОВЕРКА ДИСТАНЦИИ ─────────────────────────────────
     const finalDist = bot.entity.position.distanceTo(tpos);
     if (finalDist > 4.8) {
-      try { bot.setControlState("forward", true); } catch {}
+      try { bot.setControlState('forward', true); } catch {}
       return;
     }
 
-    // АТАКА
-    try {
-      bot.attack(target);
-      bot._lastAttackTime = Date.now();
-      this._attackCount++;
-      this._hitCount++;
-      if (shouldCrit) {
-        this._critCount++;
-        log.debug(`[PvpController] 💥 КРИТ #${this._critCount}`);
-      }
-    } catch (err) {
-      log.debug("[PvpController] attack:", err.message);
+    // ── КРИТ: каждый 3-й удар, только если на земле и близко ─────────
+    const doCrit = bot.entity.onGround && (this._hitCount % 3 === 0) && finalDist < 3.2;
+    if (doCrit) {
+      try { bot.setControlState('jump', true);  } catch {}
+      await sleep(85 + rand(0,15));
+      try { bot.setControlState('jump', false); } catch {}
+      await sleep(230 + rand(0,40)); // ждём пика → начало падения
+
+      const afterDist = bot.entity.position.distanceTo(tpos);
+      if (afterDist > 4.8) return;
     }
 
-    // Если был крит — ждём посадки перед следующим тиком
-    if (shouldCrit) {
-      await sleep(280); // ждём приземления
+    // ── АТАКА ────────────────────────────────────────────────────────
+    try {
+      bot.attack(target);
+      this._lastAttackMs = Date.now();
+      this._attackCount++;
+      this._hitCount++;
+      if (doCrit) { this._critCount++; log.debug('[PvpController] 💥 КРИТ #' + this._critCount); }
+
+      // ── W-TAP: release W 50-80мс (KB separation, легитно) ─────────
+      try { bot.setControlState('forward', false); } catch {}
+      await sleep(50 + rand(0, 30));
+      if (this._running && this._target) {
+        const aftD = bot.entity?.position?.distanceTo(tpos) ?? 0;
+        if (aftD > 1.5) { try { bot.setControlState('forward', true); } catch {} }
+      }
+    } catch (err) {
+      log.debug('[PvpController] attack:', err.message);
     }
+
+    if (doCrit) { await sleep(180 + rand(0,40)); } // ждём приземления
   }
 
   // ── HP-ЛОГИКА ЕДЫ ───────────────────────────────────────────────────

@@ -114,6 +114,11 @@ class AgentLoop {
     if (!attacker?.position) return;
     const name = attacker.username || attacker.mobType || attacker.name || "unknown";
     const isPlayer = attacker.type === "player" && attacker.username !== this.bot.username;
+    // Не атакуем игроков если PVP выключен в настройках бота
+    if (isPlayer && !this.instance.config?.pvpEnabled) {
+      log.debug("[AgentLoop] PVP off — ignoring player attacker:", name);
+      return;
+    }
 
     log.info(`[AgentLoop] Hit by: ${name} (${isPlayer ? "player" : "mob"})`);
 
@@ -161,6 +166,10 @@ class AgentLoop {
     this._movingToTarget = false;
     this._moveTargetPos = null;
     this._antiDetect.setInCombat(false);
+    // Стопаем pathfinder и сбрасываем управление чтобы не было idle-ходьбы
+    try { this.bot.pathfinder.stop(); } catch {}
+    try { this.bot.setControlState('forward', false); } catch {}
+    try { this.bot.setControlState('sprint',  false); } catch {}
   }
 
   // ── Боевой цикл (260мс) ─────────────────────────────────────────────
