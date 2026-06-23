@@ -1213,16 +1213,16 @@ class BotManager {
     if (instance._pvpController?.isRunning()) return { pvpMode: true };
 
     // ── Ставим Ollama/SurvivorAI на паузу пока активен PVP ──────────
-    // SurvivorAI тоже использует pathfinder — они конфликтуют
-    if (instance.aiBrain?.isRunning?.()) {
-      instance.aiBrain.stopAutonomous();
-      instance._aiBrainWasActive = true;
-      log.info(`[BotManager] PVP: Ollama AI приостановлен на время PVP`);
+    // aiBrain.isRunning — это boolean-свойство, не функция!
+    if (instance.aiBrain) {
+      try { instance.aiBrain.stopAutonomous(); } catch {}
+      instance._aiBrainWasActive = !!(instance.aiEnabled);
+      log.info('[BotManager] PVP: Ollama AI приостановлен');
     }
     if (instance.survivorAI) {
-      try { instance.survivorAI.stop?.(); } catch {}
+      try { await instance.survivorAI.stop(); } catch {}
       instance._survivorWasActive = true;
-      log.info(`[BotManager] PVP: SurvivorAI приостановлен на время PVP`);
+      log.info('[BotManager] PVP: SurvivorAI приостановлен');
     }
 
     // Сохраняем оригинальные движения pathfinder чтобы восстановить для Ollama
