@@ -105,9 +105,16 @@ class PvpController {
     this._onHurt = () => {
       const currentHP = bot.health ?? 20;
       if (currentHP < this._lastHP - 0.5 && this._isDoingAction) {
-        log.debug("[PvpController] урон получен во время действия — прерываем");
-        this._isDoingAction = false;
-        this._forceAttack = 3;
+        if (currentHP <= 1) {
+          // Тотем сработал — HP на 1, нужно срочно ЕСТЬ, а не атаковать
+          log.debug("[PvpController] 🛡️ Тотем сработал — продолжаем лечение");
+          this._isDoingAction = false;
+          this._forceAttack = 0; // не атаковать — лечиться
+        } else {
+          log.debug("[PvpController] урон получен во время действия — прерываем");
+          this._isDoingAction = false;
+          this._forceAttack = 3;
+        }
       }
       this._lastHP = currentHP;
     };
@@ -196,6 +203,7 @@ class PvpController {
 
       // 5. БАФ-ЗЕЛЬЕ раз в 30 сек
       if (this._tickCount % 8 === 0)  await this._autoBuffPotions(bot);
+      if (this._tickCount % 15 === 0) await this._tryDebuffPotion(bot);
       if (this._tickCount % 50 === 0) await this._tryBuffPotion(bot);
 
       // 6. ХИЛ-ЗЕЛЬЕ при HP < 10
@@ -215,6 +223,7 @@ class PvpController {
 
   // ── ДВИЖЕНИЕ + АТАКА (CD-aware, W-tap, щит+топор) ──────────────────
   async _doMoveAndAttack(bot, dist) {
+    if (this._isDoingAction) return; // доп. защита от гонки еда↔оружие
     const target = this._target;
     if (!target?.position || !bot.entity) return;
 
@@ -245,7 +254,12 @@ class PvpController {
     }
 
     // ── ДВИЖЕНИЕ ─────────────────────────────────────────────────────
+    // Закрываем инвентарь/сундук если открыт
+    try { if (bot.currentWindow) bot.closeWindow(bot.currentWindow); } catch {}
+
     if (dist > 3.0) {
+      // Смотрим в сторону цели во время бега (иначе бот "смотрит в небо")
+      try { await bot.look(yaw, 0, false); } catch {}
       try { bot.setControlState('forward', true);  } catch {}
       try { bot.setControlState('sprint',  true);  } catch {}
       if (dist > 6) {
@@ -305,6 +319,15 @@ class PvpController {
         if (vy < -0.01) break; // падаем → бьём
         await sleep(20); waitCrit += 20;
       }
+      // ← Пересчитываем прицел с новой позиции бота (он поднялся)
+      const cPos = bot.entity.position;
+      const cdx = tpos.x - cPos.x, cdz = tpos.z - cPos.z;
+      const cd2d = Math.max(Math.sqrt(cdx*cdx + cdz*cdz), 0.01);
+      const cYaw = Math.atan2(-cdx, -cdz);
+      const cAimY = tpos.y + (target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5);
+      const cPitch = -Math.atan2(cAimY - (cPos.y + 1.62), cd2d);
+      try { await bot.look(cYaw, cPitch, true); } catch {}
+      await sleep(25);
       const afterDist = bot.entity.position.distanceTo(tpos);
       if (afterDist > 4.8) return;
     }
@@ -438,6 +461,28 @@ class PvpController {
 
   // ── СПЛЭШ ЗЕЛЬЕ ─────────────────────────────────────────────────────
   // buff/heal = на себя (вверх), debuff = на врага (вперёд-вниз)
+
+  // ── ДЕБАФ-ЗЕЛЬЯ: бросаем харм/яд на врага ───────────────────────────
+  async _tryDebuffPotion(bot) {
+    if (!this._target || this._isDoingAction) return;
+    const cfg = this.instance.config || {};
+    if (cfg.useSplashPotions === false) return; // отключено в настройках
+
+    const dist = bot.entity.position.distanceTo(this._target.position);
+    if (dist > 6) return; // слишком далеко
+
+    const items = bot.inventory.items();
+    // Ищем дебаф-зелья: instant_damage (вред), harming, poison, weakness
+    const debuffPotion = items.find(i => {
+      const n = i.name.toLowerCase();
+      return (n.includes('splash') || n.includes('lingering')) &&
+             (n.includes('instant_damage') || n.includes('harming') ||
+              n.includes('poison') || n.includes('weakness') || n.includes('slowness'));
+    });
+    if (!debuffPotion) return;
+    await this._doSplashPotion(bot, 'debuff', debuffPotion);
+  }
+
   async _doSplashPotion(bot, type, potion) {
     if (this._isDoingAction) return;
     this._isDoingAction = true;
