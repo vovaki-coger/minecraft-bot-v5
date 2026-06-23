@@ -1211,6 +1211,28 @@ class BotManager {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error('Бот не подключён');
     if (instance._pvpController?.isRunning()) return { pvpMode: true };
+
+    // ── Ставим Ollama/SurvivorAI на паузу пока активен PVP ──────────
+    // SurvivorAI тоже использует pathfinder — они конфликтуют
+    if (instance.aiBrain?.isRunning?.()) {
+      instance.aiBrain.stopAutonomous();
+      instance._aiBrainWasActive = true;
+      log.info(`[BotManager] PVP: Ollama AI приостановлен на время PVP`);
+    }
+    if (instance.survivorAI) {
+      try { instance.survivorAI.stop?.(); } catch {}
+      instance._survivorWasActive = true;
+      log.info(`[BotManager] PVP: SurvivorAI приостановлен на время PVP`);
+    }
+
+    // Сохраняем оригинальные движения pathfinder чтобы восстановить для Ollama
+    try {
+      const bot = instance.bot;
+      if (bot?.pathfinder) {
+        instance._originalMovements = bot.pathfinder.movements;
+      }
+    } catch {}
+
     instance._pvpController = new PvpController(instance, this.emit);
     instance._pvpController.start(opts);
     instance._pvpLoopRunning = true;
@@ -1226,6 +1248,33 @@ class BotManager {
     instance._pvpLoopRunning = false;
     if (instance._pvpLoopTimer) { clearTimeout(instance._pvpLoopTimer); instance._pvpLoopTimer = null; }
     try { if (instance.bot?.pvp) instance.bot.pvp.stop(); } catch {}
+
+    // ── Восстанавливаем оригинальные движения для Ollama ────────────
+    try {
+      const bot = instance.bot;
+      if (bot?.pathfinder && instance._originalMovements) {
+        bot.pathfinder.setMovements(instance._originalMovements);
+        instance._originalMovements = null;
+        log.info(`[BotManager] PVP stop: движения pathfinder восстановлены для Ollama`);
+      }
+    } catch {}
+
+    // ── Возобновляем Ollama/SurvivorAI ──────────────────────────────
+    if (instance._aiBrainWasActive && instance.aiBrain && instance.aiEnabled) {
+      try {
+        instance.aiBrain.startAutonomous(10000);
+        instance._aiBrainWasActive = false;
+        log.info(`[BotManager] PVP stop: Ollama AI возобновлён`);
+      } catch (e) { log.warn('[BotManager] resume aiBrain:', e.message); }
+    }
+    if (instance._survivorWasActive && instance.survivorAI) {
+      try {
+        instance.survivorAI.start?.();
+        instance._survivorWasActive = false;
+        log.info(`[BotManager] PVP stop: SurvivorAI возобновлён`);
+      } catch {}
+    }
+
     this.emit('bot:pvpToggled', { botId, pvpMode: false });
     return { pvpMode: false };
   }
