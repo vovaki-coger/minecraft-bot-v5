@@ -803,14 +803,22 @@ class PvpController {
     // ── ПЕРВЫЙ ПРИОРИТЕТ: bot.players — самый надёжный источник для игроков ──
     // bot.entities иногда теряет игрока (isValid=false, entity временно удалена),
     // а bot.players всегда актуален пока игрок на сервере.
+    // ВАЖНО: entity.position может быть null если entity временно невалидна.
+    // В этом случае берём последнюю известную позицию из _stickyTarget.
     for (const [pKey, pInfo] of Object.entries(bot.players || {})) {
-      if (!pInfo?.entity?.position) continue;
+      if (!pInfo?.entity) continue;
       const uname = (typeof pInfo.username === 'string' ? pInfo.username : pKey).toLowerCase();
       if (uname === botName || this._teammates.has(uname)) continue;
       const e = pInfo.entity;
       if (e === bot.entity) continue;
+      // Позиция: берём из entity или из sticky если entity.position временно null
+      let pos = e.position;
+      if (!pos && uname === this._lastTargetName && this._stickyTarget?.position) {
+        pos = this._stickyTarget.position;
+      }
+      if (!pos) continue;
       let d;
-      try { d = myPos.distanceTo(e.position); } catch { continue; }
+      try { d = myPos.distanceTo(pos); } catch { continue; }
       if (isNaN(d) || d >= minDist) continue;
       minDist = d; closest = e;
     }
