@@ -97,6 +97,9 @@ export default function PvpTab() {
   const [attackRange, setAttackRange]     = useState(4.5);
   const [pvpActive, setPvpActive]         = useState(false);
   const [saved, setSaved]                 = useState(false);
+  const [brainTraining, setBrainTraining]  = useState(false);
+  const [brainPct, setBrainPct]            = useState(0);
+  const [brainMsg, setBrainMsg]            = useState("Загрузка...");
 
   const [serverProfile, setServerProfile]                     = useState<string>("custom");
   const [gappleCooldown, setGappleCooldown]                   = useState(30);
@@ -120,6 +123,25 @@ export default function PvpTab() {
     setGappleCooldown(cfg.pvpGappleCooldown ?? 30);
     setEnchantedGappleCooldown(cfg.pvpEnchantedGappleCooldown ?? 120);
     setPearlCooldown(cfg.pvpPearlCooldown ?? 16);
+  }, [bot?.id]);
+
+  // Слушаем события обучения нейросети
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (!api?.onBotEvent) return;
+    const unsub = api.onBotEvent((ch: string, data: any) => {
+      if (!bot || data?.botId !== bot.id) return;
+      if (ch === "bot:pvpBrainTraining") {
+        setBrainTraining(true);
+        setBrainPct(data.pct ?? 0);
+        setBrainMsg(data.msg ?? "Обучение...");
+      }
+      if (ch === "bot:pvpBrainReady") {
+        setBrainTraining(false);
+        setBrainPct(100);
+      }
+    });
+    return () => { try { unsub?.(); } catch {} };
   }, [bot?.id]);
 
   // Синхронизируем pvpActive при изменении pvpMode в store
@@ -239,7 +261,48 @@ export default function PvpTab() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3" style={{ position: "relative" }}>
+
+        {/* ── ЭКРАН ЗАГРУЗКИ НЕЙРОСЕТИ ──────────────────────────── */}
+        {pvpActive && brainTraining && (
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 50,
+            background: "rgba(8,10,16,0.96)",
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            gap: 18, borderRadius: 8,
+            backdropFilter: "blur(6px)",
+          }}>
+            {/* Спиннер */}
+            <div style={{
+              width: 52, height: 52, borderRadius: "50%",
+              border: "3px solid rgba(155,89,182,0.2)",
+              borderTop: "3px solid #9b59b6",
+              animation: "spin 1s linear infinite",
+            }} />
+            <style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ color: "#9b59b6", fontFamily: "monospace", fontSize: 13, fontWeight: "bold", marginBottom: 8 }}>
+                🧠 Обучение нейросети PVP
+              </div>
+              <div style={{ color: "#aaa", fontFamily: "monospace", fontSize: 11, marginBottom: 14 }}>
+                {brainMsg}
+              </div>
+              {/* Прогресс-бар */}
+              <div style={{ width: 200, height: 6, background: "rgba(155,89,182,0.2)", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", borderRadius: 3,
+                  background: "linear-gradient(90deg, #9b59b6, #e74c3c)",
+                  width: brainPct + "%",
+                  transition: "width 0.5s ease",
+                }} />
+              </div>
+              <div style={{ color: "#666", fontFamily: "monospace", fontSize: 10, marginTop: 6 }}>
+                {brainPct}% — Следующие запуски будут мгновенными
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── КНОПКА ЗАПУСКА ─────────────────────────────────────────── */}
         <button

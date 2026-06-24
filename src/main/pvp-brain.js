@@ -823,6 +823,8 @@ class PvpBrain {
   constructor() {
     this.net = null;
     this.ready = false;
+    this._onProgress = null; // (pct, msg) => void
+    this._onReady = null;    // () => void
     this._initNet();
   }
 

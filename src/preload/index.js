@@ -76,7 +76,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       "bot:aiToggled", "bot:windowOpen", "bot:windowClose", "bot:modelDetected",
       "bot:anarchyStarted", "bot:anarchyStopped", "bot:anarchyPhase", "bot:anarchyLog",
       "bot:farmStarted", "bot:farmStopped", "bot:farmLog",
-      "bot:pvpStarted", "bot:pvpStopped", "bot:pvpToggled",
+      "bot:pvpStarted", "bot:pvpStopped", "bot:pvpToggled", "bot:pvpBrainTraining", "bot:pvpBrainReady",
       "bot:chestOpened", "bot:chestClosed",
       "ollama:pullProgress",
       "coordinator:statusUpdate", "coordinator:taskAssigned", "coordinator:groupChat",

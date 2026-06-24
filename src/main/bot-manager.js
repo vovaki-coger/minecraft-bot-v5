@@ -1237,6 +1237,19 @@ class BotManager {
     instance._pvpController.start(opts);
     instance._pvpLoopRunning = true;
     this.emit('bot:pvpToggled', { botId, pvpMode: true });
+
+    // Подключаем прогресс обучения нейросети к renderer
+    const brain = instance._pvpController.brain;
+    if (brain && !brain.ready) {
+      this.emit('bot:pvpBrainTraining', { botId, pct: 0, msg: 'Генерируем сценарии...' });
+      brain._onProgress = (pct, msg) => {
+        this.emit('bot:pvpBrainTraining', { botId, pct, msg });
+      };
+      brain._onReady = () => {
+        this.emit('bot:pvpBrainReady', { botId });
+      };
+    }
+
     return { pvpMode: true };
   }
 
