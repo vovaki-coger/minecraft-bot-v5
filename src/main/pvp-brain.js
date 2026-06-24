@@ -1,5 +1,5 @@
 /**
- * PvpBrain v4 — нейросеть PVP, 1 626 000+ обучающих сценариев (1266k + 360k v4.0)
+ * PvpBrain v5 — нейросеть PVP, 2 626 000+ обучающих сценариев (1626k + 1000k v5.0)
  *
  * Архитектура: brain.js NeuralNetwork 12→24→18→12→7
  * Входной вектор (12 признаков):
@@ -1378,6 +1378,255 @@ function buildSeedData() {
         }
       }
       label([dist,bHp,tHp,hpDiff,hunger,sword,0,0,0,cd,rnd(0,0.5),rnd(0,0.3)], atk,0,0,0,0,0,str);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // +1 000 000 СЦЕНАРИЕВ v5.0 — итого ≈2 626 000+
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const rnd  = (a,b) => a + Math.random()*(b-a);
+    const pick = arr  => arr[Math.floor(Math.random()*arr.length)];
+
+    // ── БЛОК T: 200 000 — КРИТ С ПРИЦЕЛОМ НА ТЕЛО (НЕ В НЕБО) ─────────────
+    // Учит: при прыжке смотреть на центр тела (pitch > 0), никогда не вверх.
+    // Именно это определяет, зачтётся ли крит как крит по телу или промах.
+    // pitch=0 = горизонт; pitch>0 = вниз (правильно); pitch<0 = вверх (БАЕГ)
+    for (let i = 0; i < 200000; i++) {
+      const dist   = rnd(0.05, 0.30);   // вплотную — зона крита
+      const bHp    = rnd(0.25, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.50, 1.0);
+      const cd     = rnd(0.85, 1.0);    // CD почти всегда готов для крита
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Высота прыжка над целью: 0=земля, 1=пик (0.5+ блоков выше)
+      const jumpPhase = rnd(0.0, 1.0);
+      // pitchScore: 1.0 = смотришь вниз на тело (правильно), 0 = смотришь вверх
+      // Чем выше jumpPhase — тем легче смотреть вниз (ты выше цели)
+      const pitchScore = clamp(0.65 + jumpPhase * 0.35, 0.50, 1.0);
+
+      let atk = 0, str = 0;
+      if (jumpPhase > 0.55) {
+        // Пик прыжка: бьём, смотрим вниз на тело
+        atk = clamp(cd * pitchScore * 0.95, 0.75, 1.0);
+        str = tHp < 0.15 ? 0 : 0.03;
+      } else if (jumpPhase > 0.30) {
+        // Восходящая фаза: ещё рано бить — страфим
+        str = clamp(0.30 + (0.55-jumpPhase)*1.2, 0.20, 0.65);
+        atk = 0;
+      } else {
+        // На земле: ждём отрыва от земли
+        str = 0.12;
+        atk = 0;
+      }
+      // Вектор: [dist, bHp, tHp, hpDiff, hunger, sword=1, 0, 0, jumpPhase, cd, 0, 0]
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,jumpPhase,cd,0,0], atk,0,0,0,0,0,str);
+    }
+
+    // ── БЛОК U: 150 000 — агрессивное преследование на средних дистанциях ──
+    // Цель: бот активно давит (3.5-8 блоков) не теряя скорости
+    for (let i = 0; i < 150000; i++) {
+      const dist   = rnd(0.35, 0.80);
+      const bHp    = rnd(0.30, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.55, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const sword  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk=0, str=0;
+      const chasing = clamp((dist-0.35)/0.45, 0, 1); // 0=близко, 1=далеко
+
+      if (dist > 0.70) {
+        // Очень далеко — максимальный бег
+        str = clamp(0.90 + chasing*0.09, 0.87, 0.99);
+      } else if (dist > 0.50) {
+        str = clamp(0.78 + chasing*0.14, 0.72, 0.92);
+        atk = (dist < 0.58 && cd > 0.90 && sword) ? clamp(cd*0.65, 0.50, 0.80) : 0;
+      } else {
+        // 3.5-5 блоков — начинаем замедляться для атаки
+        if (cd > 0.82 && sword) {
+          atk = clamp(cd*0.78, 0.58, 0.88);
+          str = 0.35;
+        } else {
+          str = clamp(0.60+(0.82-cd)*0.45, 0.42, 0.85);
+        }
+      }
+      label([dist,bHp,tHp,hpDiff,hunger,sword,0,0,0,cd,rnd(0,0.3),rnd(0,0.2)], atk,0,0,0,0,0,str);
+    }
+
+    // ── БЛОК V: 150 000 — контроль ситуации в бою 1v1 ──────────────────────
+    // Обучаем точную логику: когда атаковать, когда страфить, когда отступать
+    for (let i = 0; i < 150000; i++) {
+      const dist   = rnd(0.0, 0.60);
+      const bHp    = rnd(0.10, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.35, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const sword  = pick([0,1]);
+      const hasHl  = pick([0,1]);
+      const hasFd  = pick([0,1]);
+      const ally   = rnd(0, 0.3);
+      const enemy  = rnd(0.05, 0.5);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk=0, ret=0, eat=0, heal=0, str=0;
+      const adv = hpDiff;   // > 0.5 = мы в плюсе, < 0.5 = мы в минусе
+
+      if (bHp < 0.12) {
+        heal = hasHl ? 0.90 : 0;
+        eat  = (!heal && hasFd && hunger < 0.5) ? 0.70 : 0;
+        ret  = (!heal && !eat) ? 0.88 : 0.40;
+      } else if (adv < 0.30 && tHp > 0.50) {
+        // Мы сильно проигрываем по HP
+        str = clamp(0.65 + (0.30-adv)*0.80, 0.45, 0.88);
+        ret = clamp(0.30 + (0.30-adv)*0.50, 0.15, 0.65);
+      } else if (adv > 0.65 && cd > 0.78 && dist < 0.30 && sword) {
+        // Мы в плюсе — максимальная атака
+        atk = clamp(cd*0.92 + (adv-0.65)*0.15, 0.72, 0.99);
+        str = 0.06;
+      } else if (dist < 0.22 && cd > 0.72 && sword) {
+        atk = clamp(cd*0.86, 0.60, 0.95);
+        str = 0.10;
+      } else {
+        str = clamp(0.50 + (1-cd)*0.38, 0.32, 0.88);
+        atk = (cd > 0.85 && dist < 0.25 && sword) ? clamp(cd*0.75, 0.55, 0.88) : 0;
+      }
+      label([dist,bHp,tHp,hpDiff,hunger,sword,hasFd,hasHl,0,cd,ally,enemy], atk,ret,eat,heal,0,0,str);
+    }
+
+    // ── БЛОК W: 150 000 — командный бой (тимейты + несколько врагов) ───────
+    for (let i = 0; i < 150000; i++) {
+      const dist   = rnd(0.0, 0.90);
+      const bHp    = rnd(0.15, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.45, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const ally   = rnd(0.10, 0.80);   // тимейты есть
+      const enemy  = rnd(0.10, 0.80);
+      const sword  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk=0, ret=0, str=0;
+      const teamAdv = ally - enemy;   // > 0 = наша команда сильнее
+
+      if (teamAdv > 0.30) {
+        // Наша команда сильнее — агрессивная атака
+        atk = (dist < 0.30 && cd > 0.75 && sword) ? clamp(cd*0.88*(1+teamAdv*0.15), 0.65, 1.0) : 0;
+        str = !atk ? clamp(0.70 + teamAdv*0.25, 0.60, 0.95) : 0.08;
+      } else if (teamAdv < -0.25) {
+        // Враги сильнее — отступаем + поддержка тимейтов
+        ret  = clamp(0.55 + (-teamAdv)*0.60, 0.35, 0.90);
+        // Но если цель слабая — добиваем перед отступлением
+        atk  = (tHp < 0.15 && dist < 0.25 && cd > 0.80) ? 0.70 : 0;
+      } else {
+        // Паритет — стандартный бой
+        str = clamp(0.50+(1-cd)*0.30, 0.32, 0.82);
+        atk = (dist < 0.28 && cd > 0.80 && sword) ? clamp(cd*0.82, 0.58, 0.92) : 0;
+      }
+      if (ally > 0.50) { atk = clamp(atk*1.15, 0, 1); }  // бонус от тимейтов
+      label([dist,bHp,tHp,hpDiff,hunger,sword,0,0,0,cd,ally,enemy], atk,ret,0,0,0,0,str);
+    }
+
+    // ── БЛОК X: 150 000 — эджкейсы (тотем, пустой инвентарь, воздух) ──────
+    for (let i = 0; i < 150000; i++) {
+      const dist   = rnd(0.0, 1.0);
+      const bHp    = rnd(0.0, 1.0);
+      const tHp    = rnd(0.01, 1.0);
+      const hunger = rnd(0.0, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const sword  = pick([0,1]);
+      const hasHl  = pick([0,1]);
+      const hasFd  = pick([0,1]);
+      const enemy  = rnd(0, 0.7);
+      const ally   = rnd(0, 0.4);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk=0, ret=0, eat=0, heal=0, perk=0, str=0;
+
+      // Тотем сработал (bHp ≈ 0.05)
+      if (bHp < 0.08) {
+        heal = hasHl ? clamp(0.95+(0.08-bHp)*5, 0.90, 0.99) : 0;
+        ret  = !heal ? 0.98 : 0.72;
+        // Никогда не атакуем когда тотем только сработал
+      }
+      // Без оружия — не атакуем
+      else if (!sword) {
+        str = clamp(0.55 + dist*0.30, 0.40, 0.88);
+        ret = bHp < 0.35 ? clamp(0.65, 0.40, 0.90) : 0;
+      }
+      // Голодный (hunger < 0.3) + высокое HP → едим перед боем
+      else if (hunger < 0.30 && bHp > 0.55 && hasFd) {
+        eat  = clamp(0.75+(0.30-hunger)*1.5, 0.60, 0.92);
+        str  = 0.20;
+      }
+      // Бафф/зелье (jumpPhase как proxy) — применяем перк
+      else if (dist < 0.20 && cd > 0.88) {
+        perk = pick([0,1]) ? clamp(0.65+rnd(0,0.25), 0.60, 0.90) : 0;
+        atk  = !perk ? clamp(cd*0.88, 0.68, 0.97) : clamp(cd*0.60, 0.45, 0.80);
+      }
+      // Нормальный бой
+      else {
+        atk = (dist < 0.28 && cd > 0.75 && sword) ? clamp(cd*0.82, 0.55, 0.95) : 0;
+        str = !atk ? clamp(0.55+(1-cd)*0.35, 0.35, 0.88) : 0.10;
+      }
+      label([dist,bHp,tHp,hpDiff,hunger,sword,hasFd,hasHl,0,cd,ally,enemy], atk,ret,eat,heal,0,perk,str);
+    }
+
+    // ── БЛОК Y: 100 000 — идеальный W-TAP ритм ──────────────────────────────
+    // W-TAP: вперёд → стоп → удар → вперёд. Точный тайминг сбивает прицел врага.
+    for (let i = 0; i < 100000; i++) {
+      const dist   = rnd(0.05, 0.35);
+      const bHp    = rnd(0.30, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.50, 1.0);
+      const cd     = rnd(0.70, 1.0);
+      const sword  = 1;
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // tapPhase: 0=стоп (W-TAP момент), 1=движение (после W-TAP)
+      const tapPhase = rnd(0.0, 1.0);
+
+      let atk=0, str=0;
+      if (tapPhase < 0.18) {
+        // Момент W-TAP: остановились, бьём
+        atk = clamp(cd * 0.96, 0.78, 1.0);
+        str = 0.0;
+      } else if (tapPhase < 0.40) {
+        // Сразу после удара: движение
+        str = clamp(0.65 + tapPhase*0.8, 0.55, 0.88);
+        atk = 0;
+      } else {
+        // Сближение: движение к цели
+        str = clamp(0.70 + (1-tapPhase)*0.20, 0.55, 0.88);
+        atk = (cd > 0.92 && dist < 0.20) ? clamp(cd*0.80, 0.65, 0.92) : 0;
+      }
+      label([dist,bHp,tHp,hpDiff,hunger,sword,0,0,tapPhase,cd,0,0], atk,0,0,0,0,0,str);
+    }
+
+    // ── БЛОК Z: 100 000 — дополнительный рандомный шум (робастность) ────────
+    // Случайные сценарии — учат модель не переобучаться на паттернах
+    for (let i = 0; i < 100000; i++) {
+      const dist   = rnd(0.0, 1.0);
+      const bHp    = rnd(0.0, 1.0);
+      const tHp    = rnd(0.01, 1.0);
+      const hunger = rnd(0.0, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const sword  = pick([0,1]);
+      const hasHl  = pick([0,1]);
+      const hasFd  = pick([0,1]);
+      const ally   = rnd(0, 0.5);
+      const enemy  = rnd(0, 0.5);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk=0, ret=0, eat=0, heal=0, str=0;
+
+      // Простые правила = чёткие метки без шума
+      if (bHp < 0.10) { heal = hasHl ? 0.92 : 0; ret = !heal ? 0.95 : 0.55; }
+      else if (dist < 0.22 && cd > 0.80 && sword) { atk = clamp(cd*0.88, 0.65, 0.96); str = 0.08; }
+      else if (dist > 0.60) { str = clamp(0.80+dist*0.15, 0.72, 0.96); }
+      else { str = clamp(0.50+(1-cd)*0.40, 0.30, 0.85); atk = (cd>0.90&&dist<0.28&&sword)?clamp(cd*0.78,0.60,0.92):0; }
+
+      label([dist,bHp,tHp,hpDiff,hunger,sword,hasFd,hasHl,0,cd,ally,enemy], atk,ret,eat,heal,0,0,str);
     }
   }
 
