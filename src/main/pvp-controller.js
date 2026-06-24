@@ -291,10 +291,19 @@ class PvpController {
         // Используем pathfinder для навигации через препятствия
         try {
           const { goals } = require('mineflayer-pathfinder');
-          // Ставим цель только если она далеко ушла (не перезапускать каждый тик)
-          if (!this._lastGoalPos || this._lastGoalPos.distanceTo(tpos) > 3) {
+          // FIX: обновляем цель если pathfinder остановился, цель сместилась >1.5 блоков, или >800ms
+          // Баг был: _lastGoalPos.distanceTo(tpos) > 3 не срабатывал когда pathfinder
+          // уже достиг старой цели рядом с новой позицией цели — бот зависал
+          const _pfDone = !bot.pathfinder.goal;
+          const _nowMs = Date.now();
+          const _needsGoalUpdate = !this._lastGoalPos ||
+            this._lastGoalPos.distanceTo(tpos) > 1.5 ||
+            _pfDone ||
+            (_nowMs - (this._lastGoalUpdate || 0)) > 800;
+          if (_needsGoalUpdate) {
             this._lastGoalPos = tpos.clone();
-            bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2.5), false);
+            this._lastGoalUpdate = _nowMs;
+            bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), true);
           }
         } catch {
           // Фоллбэк: прямой контроль
