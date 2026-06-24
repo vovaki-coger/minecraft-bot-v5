@@ -4,19 +4,19 @@ import { useAppStore } from "../../store/appStore";
 interface LogEntry {
   id: number;
   ts: number;
-  type: "pvp" | "farm" | "task" | "system" | "death" | "chat" | "error" | "proxy";
+  type: "pvp" | "farm" | "task" | "system" | "death" | "error" | "survivor" | "anarchy";
   msg: string;
 }
 
 const TYPE_CONFIG: Record<LogEntry["type"], { color: string; label: string }> = {
-  pvp:    { color: "#e74c3c", label: "⚔️ PVP" },
-  farm:   { color: "#7ecc49", label: "🌾 Ферма" },
-  task:   { color: "#3498db", label: "🎯 Задача" },
-  system: { color: "#9b59b6", label: "⚙️ Система" },
-  death:  { color: "#e67e22", label: "💀 Смерть" },
-  chat:   { color: "#95a5a6", label: "💬 Чат" },
-  error:  { color: "#c0392b", label: "❌ Ошибка" },
-  proxy:  { color: "#1abc9c", label: "🔌 Прокси" },
+  pvp:      { color: "#e74c3c", label: "⚔️ PVP" },
+  farm:     { color: "#7ecc49", label: "🌾 Ферма" },
+  task:     { color: "#3498db", label: "🎯 Задача" },
+  system:   { color: "#9b59b6", label: "⚙️ Система" },
+  death:    { color: "#e67e22", label: "💀 Смерть" },
+  error:    { color: "#c0392b", label: "❌ Ошибка" },
+  survivor: { color: "#f39c12", label: "🛡️ Выживальщик" },
+  anarchy:  { color: "#8e44ad", label: "🏴‍☠️ Анархия" },
 };
 
 const ALL_TYPES = Object.keys(TYPE_CONFIG) as LogEntry["type"][];
@@ -39,8 +39,9 @@ export default function LogsTab() {
   const logsRef = useRef<LogEntry[]>([]);
 
   function addLog(type: LogEntry["type"], msg: string) {
+    if (!msg?.trim()) return;
     const entry: LogEntry = { id: _logId++, ts: Date.now(), type, msg };
-    logsRef.current = [...logsRef.current.slice(-299), entry];
+    logsRef.current = [...logsRef.current.slice(-399), entry];
     setLogs([...logsRef.current]);
   }
 
@@ -48,42 +49,41 @@ export default function LogsTab() {
     const api = (window as any).electronAPI;
     if (!api?.onBotEvent) return;
 
-    const unsub = api.onBotEvent((ch: string, data: any) => {
-      if (!data || (data.botId && data.botId !== selectedBotId)) return;
+    const handlers: Array<() => void> = [];
 
-      switch (ch) {
-        case "bot:actionLog":
-          addLog(data.logType || "system", data.msg || data.message || "");
-          break;
-        case "bot:pvpToggled":
-          addLog("pvp", data.pvpMode ? "▶ PVP режим запущен" : "⏹ PVP режим остановлен");
-          break;
-        case "bot:death":
-          addLog("death", `💀 Бот умер | pos: ${data.pos?.x ?? "?"} ${data.pos?.y ?? "?"} ${data.pos?.z ?? "?"}`);
-          break;
-        case "bot:statusChanged":
-          if (data.status === "online") addLog("system", `✅ Подключён к серверу`);
-          else if (data.status === "offline") addLog("system", `🔌 Отключён (${data.reason ?? ""})`);
-          break;
-        case "bot:error":
-          addLog("error", `❌ ${data.message ?? data.msg ?? "Ошибка"}`);
-          break;
-        case "bot:pvpDetected":
-          addLog("pvp", `🎯 Обнаружен враг: ${data.enemy ?? "?"} | HP=${data.health ?? "?"}`);
-          break;
-        case "bot:chat":
-          if (data.type !== "player") break;
-          addLog("chat", `[${data.username}]: ${data.message}`);
-          break;
-        case "bot:actionStopped":
-          addLog("task", "⏹ Задача остановлена");
-          break;
-        default:
-          break;
-      }
+    function sub(ch: string, fn: (d: any) => void) {
+      const unsub = api.onBotEvent((channel: string, data: any) => {
+        if (channel !== ch) return;
+        if (data?.botId && selectedBotId && data.botId !== selectedBotId) return;
+        fn(data);
+      });
+      handlers.push(unsub);
+    }
+
+    sub("bot:actionLog",        d => addLog(d.logType || "system", d.msg || d.message || ""));
+    sub("bot:pvpStarted",       () => addLog("pvp",     "▶ PVP режим запущен — крит+спринт"));
+    sub("bot:pvpStopped",       () => addLog("pvp",     "⏹ PVP режим остановлен"));
+    sub("bot:pvpToggled",       d => addLog("pvp",      d.pvpMode ? "▶ PVP запущен" : "⏹ PVP остановлен"));
+    sub("bot:pvpDetected",      d => addLog("pvp",      `🎯 Враг обнаружен: ${d.enemy ?? "?"} | HP=${d.health ?? "?"}`));
+    sub("bot:death",            d => addLog("death",    `💀 Умер! Pos: ${d.pos?.x ?? "?"} ${d.pos?.y ?? "?"} ${d.pos?.z ?? "?"}`));
+    sub("bot:error",            d => addLog("error",    `❌ ${d.message ?? d.msg ?? "Ошибка"}`));
+    sub("bot:statusChanged",    d => {
+      if (d.status === "online")  addLog("system", `✅ Подключён к серверу`);
+      if (d.status === "offline") addLog("system", `🔌 Отключён — ${d.reason ?? "нет причины"}`);
     });
+    sub("bot:actionStopped",    () => addLog("task",    "⏹ Задача/действие остановлено"));
+    sub("bot:survivorStarted",  () => addLog("survivor","▶ Режим выживальщика запущен"));
+    sub("bot:survivorStopped",  () => addLog("survivor","⏹ Режим выживальщика остановлен"));
+    sub("bot:survivorLog",      d => addLog("survivor", d.msg || d.message || d.text || ""));
+    sub("bot:farmStarted",      d => addLog("farm",     `▶ Фарм запущен: ${d.task ?? d.mode ?? "авто"}`));
+    sub("bot:farmStopped",      () => addLog("farm",    "⏹ Фарм остановлен"));
+    sub("bot:farmLog",          d => addLog("farm",     d.msg || d.message || d.text || ""));
+    sub("bot:anarchyStarted",   () => addLog("anarchy", "▶ Анархия-протокол запущен"));
+    sub("bot:anarchyStopped",   () => addLog("anarchy", "⏹ Анархия-протокол остановлен"));
+    sub("bot:anarchyLog",       d => addLog("anarchy",  d.msg || d.message || d.text || ""));
+    sub("bot:anarchyPhase",     d => addLog("anarchy",  `Фаза: ${d.phase ?? "?"}`));
 
-    return () => { try { unsub?.(); } catch {} };
+    return () => handlers.forEach(u => { try { u?.(); } catch {} });
   }, [selectedBotId]);
 
   useEffect(() => {
@@ -97,54 +97,39 @@ export default function LogsTab() {
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: "transparent" }}>
       {/* Header */}
-      <div className="px-3 py-2 border-b flex items-center gap-2 flex-wrap"
-        style={{ borderColor: "rgba(55,65,88,0.5)", background: "rgba(10,12,18,0.9)" }}>
-        <span className="font-mono text-xs font-bold" style={{ color: "#9b59b6", textShadow: "0 0 10px rgba(155,89,182,0.5)" }}>
-          📋 Логи действий
+      <div className="px-2 py-1.5 border-b flex items-center gap-2"
+        style={{ borderColor: "rgba(55,65,88,0.5)", background: "rgba(10,12,18,0.9)", flexWrap: "wrap" }}>
+        <span className="font-mono text-xs font-bold" style={{ color: "#9b59b6" }}>
+          📋 Лог действий
         </span>
-        <span className="text-xs font-mono" style={{ color: "#333" }}>
-          {logs.length} записей
-        </span>
-        <div className="flex-1" />
-        {/* Auto-scroll toggle */}
-        <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+        <span style={{ color: "#333", fontSize: 10, fontFamily: "monospace" }}>{logs.length}</span>
+        <div style={{ flex: 1 }} />
+        <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer" }}>
           <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)}
-            style={{ accentColor: "#9b59b6" }} />
-          <span style={{ color: "#666", fontSize: 10, fontFamily: "monospace" }}>авто-скролл</span>
+            style={{ accentColor: "#9b59b6", width: 10, height: 10 }} />
+          <span style={{ color: "#555", fontSize: 9, fontFamily: "monospace" }}>скролл</span>
         </label>
-        {/* Clear */}
-        <button
-          onClick={() => { logsRef.current = []; setLogs([]); }}
+        <button onClick={() => { logsRef.current = []; setLogs([]); }}
           style={{
-            padding: "2px 8px", borderRadius: 4, fontSize: 10, fontFamily: "monospace",
-            border: "1px solid rgba(231,76,60,0.4)", background: "rgba(231,76,60,0.08)",
+            padding: "1px 6px", borderRadius: 3, fontSize: 9, fontFamily: "monospace",
+            border: "1px solid rgba(192,57,43,0.4)", background: "rgba(192,57,43,0.08)",
             color: "#c0392b", cursor: "pointer",
           }}>
           Очистить
         </button>
       </div>
 
-      {/* Filter bar */}
-      <div className="px-2 py-1.5 border-b flex gap-1 flex-wrap"
-        style={{ borderColor: "rgba(40,55,80,0.4)", background: "rgba(8,10,16,0.85)" }}>
-        <button
-          onClick={() => setFilter("all")}
-          style={{
-            padding: "2px 8px", borderRadius: 3, fontSize: 10, fontFamily: "monospace", cursor: "pointer",
-            border: `1px solid ${filter === "all" ? "#9b59b6" : "rgba(55,65,88,0.4)"}`,
-            background: filter === "all" ? "rgba(155,89,182,0.12)" : "transparent",
-            color: filter === "all" ? "#9b59b6" : "#444",
-          }}>
-          Все
-        </button>
-        {ALL_TYPES.map(t => {
-          const cfg = TYPE_CONFIG[t];
+      {/* Filter chips */}
+      <div className="px-1.5 py-1 border-b"
+        style={{ borderColor: "rgba(40,55,80,0.4)", background: "rgba(8,10,16,0.85)",
+          display: "flex", gap: 3, flexWrap: "wrap" }}>
+        {(["all", ...ALL_TYPES] as const).map(t => {
+          const cfg = t === "all" ? { color: "#9b59b6", label: "Все" } : TYPE_CONFIG[t];
           const active = filter === t;
           return (
-            <button key={t}
-              onClick={() => setFilter(t)}
+            <button key={t} onClick={() => setFilter(t as any)}
               style={{
-                padding: "2px 7px", borderRadius: 3, fontSize: 10, fontFamily: "monospace", cursor: "pointer",
+                padding: "1px 6px", borderRadius: 3, fontSize: 9, fontFamily: "monospace", cursor: "pointer",
                 border: `1px solid ${active ? cfg.color : "rgba(55,65,88,0.3)"}`,
                 background: active ? `${cfg.color}18` : "transparent",
                 color: active ? cfg.color : "#444",
@@ -156,30 +141,29 @@ export default function LogsTab() {
       </div>
 
       {/* Log list */}
-      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5 font-mono"
-        style={{ fontSize: 11 }}>
+      <div className="flex-1 overflow-y-auto p-1.5 flex flex-col gap-px font-mono"
+        style={{ fontSize: 10.5 }}>
         {filtered.length === 0 ? (
-          <div style={{ color: "#333", textAlign: "center", marginTop: 40, fontSize: 12 }}>
+          <div style={{ color: "#333", textAlign: "center", marginTop: 40, fontSize: 11 }}>
             {bot ? "Нет записей" : "Выберите бота"}
           </div>
         ) : (
           filtered.map(entry => {
             const cfg = TYPE_CONFIG[entry.type];
             return (
-              <div key={entry.id}
-                style={{
-                  display: "flex", gap: 6, padding: "3px 6px", borderRadius: 3,
-                  background: "rgba(14,18,26,0.5)",
-                  borderLeft: `2px solid ${cfg.color}60`,
-                  alignItems: "flex-start",
-                }}>
-                <span style={{ color: "#444", flexShrink: 0, fontSize: 10, paddingTop: 1 }}>
+              <div key={entry.id} style={{
+                display: "flex", gap: 5, padding: "2px 5px", borderRadius: 2,
+                background: "rgba(14,18,26,0.5)",
+                borderLeft: `2px solid ${cfg.color}55`,
+                alignItems: "flex-start",
+              }}>
+                <span style={{ color: "#444", flexShrink: 0, fontSize: 9, paddingTop: 1, minWidth: 50 }}>
                   {ts(entry.ts)}
                 </span>
-                <span style={{ color: cfg.color, flexShrink: 0, fontSize: 10, paddingTop: 1, minWidth: 50 }}>
+                <span style={{ color: cfg.color, flexShrink: 0, fontSize: 9, paddingTop: 1, minWidth: 60 }}>
                   {cfg.label}
                 </span>
-                <span style={{ color: "#bbb", wordBreak: "break-word", lineHeight: 1.5 }}>
+                <span style={{ color: "#bbb", wordBreak: "break-word", lineHeight: 1.45 }}>
                   {entry.msg}
                 </span>
               </div>
