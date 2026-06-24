@@ -112,6 +112,7 @@ export default function PvpTab() {
   const [brainTraining, setBrainTraining]  = useState(false);
   const [brainPct, setBrainPct]            = useState(0);
   const [brainMsg, setBrainMsg]            = useState("Загрузка...");
+  const [resetState, setResetState]        = useState<"idle"|"ok"|"none"|"err">("idle");
 
   const [serverProfile, setServerProfile]                     = useState<string>("custom");
   const [gappleCooldown, setGappleCooldown]                   = useState(30);
@@ -227,6 +228,15 @@ export default function PvpTab() {
     } catch (err) {
       console.error("[PvpTab] save error:", err);
     }
+  }
+
+  async function handleResetBrain() {
+    setResetState("idle");
+    try {
+      const res = await (window as any).electronAPI.bot.resetPvpBrain();
+      setResetState(res?.ok ? "ok" : "none");
+    } catch { setResetState("err"); }
+    setTimeout(() => setResetState("idle"), 4000);
   }
 
   async function handleTogglePvp() {
@@ -555,15 +565,44 @@ export default function PvpTab() {
 
         {/* ── О НЕЙРОСЕТИ ────────────────────────────────────────────── */}
         <div style={{ ...sectionCls, borderColor: "rgba(126,204,73,0.2)" }}>
-          <div style={{ color: "#7ecc49", fontSize: 11.5, fontFamily: "monospace", fontWeight: "bold", marginBottom: 8, textShadow: "0 0 8px rgba(126,204,73,0.3)" }}>
-            🧠 О нейросети
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ color: "#7ecc49", fontSize: 11.5, fontFamily: "monospace", fontWeight: "bold", textShadow: "0 0 8px rgba(126,204,73,0.3)" }}>
+              🧠 О нейросети
+            </div>
+            {/* Кнопка сброса весов */}
+            <button
+              onClick={handleResetBrain}
+              title="Удаляет pvp-weights.json — при следующем запуске PVP мозг переобучится на новых сценариях"
+              style={{
+                padding: "4px 10px", borderRadius: 4, fontFamily: "monospace", fontSize: 10,
+                cursor: "pointer", transition: "all 0.2s",
+                border: resetState === "ok"   ? "1px solid #7ecc49"
+                      : resetState === "none" ? "1px solid #f39c12"
+                      : resetState === "err"  ? "1px solid #e74c3c"
+                      : "1px solid rgba(155,89,182,0.6)",
+                background: resetState === "ok"   ? "rgba(126,204,73,0.12)"
+                          : resetState === "none" ? "rgba(243,156,18,0.12)"
+                          : resetState === "err"  ? "rgba(231,76,60,0.12)"
+                          : "rgba(155,89,182,0.10)",
+                color: resetState === "ok"   ? "#7ecc49"
+                     : resetState === "none" ? "#f39c12"
+                     : resetState === "err"  ? "#e74c3c"
+                     : "#9b59b6",
+              }}>
+              {resetState === "ok"   ? "✅ Сброшена!" :
+               resetState === "none" ? "⚠️ Уже нет" :
+               resetState === "err"  ? "❌ Ошибка" :
+               "🔄 Обновить память"}
+            </button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10.5, color: "#666", fontFamily: "monospace" }}>
             <div>Архитектура: <span style={{ color: "#7ecc49" }}>12→24→18→12→7</span></div>
-            <div>Сценариев обучения: <span style={{ color: "#aaa" }}>10 000+</span></div>
+            <div>Сценариев обучения: <span style={{ color: "#aaa" }}>2 626 000+</span></div>
             <div>Режим: <span style={{ color: "#e74c3c" }}>💥 Крит@360мс + 🏃 Спринт + 🎯 прицел в грудь</span></div>
             <div>Ollama конфликт: <span style={{ color: "#3498db" }}>✅ исправлен — авто-пауза</span></div>
-            <div>Сохранение: <span style={{ color: "#7ecc49" }}>✅ исправлено — store синхронизирован</span></div>
+            <div style={{ color: "#555", fontSize: 10, lineHeight: 1.5, borderTop: "1px solid rgba(55,65,88,0.4)", paddingTop: 6, marginTop: 2 }}>
+              💡 «Обновить память» — удаляет старые веса. При следующем запуске PVP бот переобучится на новых 2.6М сценариях (~20 сек).
+            </div>
           </div>
         </div>
 
