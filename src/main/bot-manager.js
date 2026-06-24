@@ -343,6 +343,7 @@ class BotManager {
         prevHealth = newHealth;
       });
       this.emit("bot:statusChanged", { botId, status: "online" });
+      this._emitActionLog(botId, 'system', '✅ Подключился к ' + instance.config.host + ':' + instance.config.port);
       this._addChat(instance, "system", "✅ Бот подключился к серверу. ИИ-мозг активирован.");
 
       // ── Inventory events — регистрируем ВНУТРИ spawn, когда bot.inventory готов ──
@@ -453,6 +454,7 @@ class BotManager {
     bot.on("death", () => {
       this._addChat(instance, "system", "💀 Бот умер! Позиция: " + Math.round(instance.stats?.x||0) + " " + Math.round(instance.stats?.y||0) + " " + Math.round(instance.stats?.z||0));
       this.emit("bot:death", { botId, nick: instance.config.nick, pos: instance.stats, timestamp: Date.now() });
+      this._emitActionLog(botId, 'death', '💀 Бот умер! Pos: ' + Math.round(instance.stats?.x||0) + ' ' + Math.round(instance.stats?.y||0) + ' ' + Math.round(instance.stats?.z||0));
       this.emit("bot:alert", { botId, type: "death", title: "💀 Бот умер!", message: "Ник: " + instance.config.nick + " | Сервер: " + instance.config.host, nick: instance.config.nick });
       instance.survivorAI?.onDeath();
     });
@@ -1068,6 +1070,7 @@ class BotManager {
       instance.taskManager = new TaskManager(instance, this.emit);
     }
     this.emit("bot:taskStarted", { botId, task: taskName });
+    this._emitActionLog(botId, 'task', '🎯 Задача запущена: ' + taskName);
     instance.taskManager.runTask(taskName, args || {}).then(() => {
       this.emit("bot:taskStopped", { botId, task: taskName });
     }).catch(err => {
@@ -1234,6 +1237,11 @@ class BotManager {
   }
 
   // ── PvP (нейросеть PvpController) ────────────────────────────────────────
+  // Утилита: отправляем лог действия боту в Logs-таб
+  _emitActionLog(botId, logType, msg) {
+    this.emit('bot:actionLog', { botId, logType, msg, ts: Date.now() });
+  }
+
   async startPvpTask(botId, opts = {}) {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error('Бот не подключён');
@@ -1264,6 +1272,7 @@ class BotManager {
     instance._pvpController.start(opts);
     instance._pvpLoopRunning = true;
     this.emit('bot:pvpToggled', { botId, pvpMode: true });
+    this._emitActionLog(botId, 'pvp', '▶ PVP режим запущен — крит+спринт');
 
     // Подключаем прогресс обучения нейросети к renderer
     const brain = instance._pvpController.brain;
@@ -1316,6 +1325,7 @@ class BotManager {
     }
 
     this.emit('bot:pvpToggled', { botId, pvpMode: false });
+    this._emitActionLog(botId, 'pvp', '⏹ PVP режим остановлен');
     return { pvpMode: false };
   }
 
