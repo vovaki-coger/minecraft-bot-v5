@@ -285,22 +285,17 @@ class PvpController {
 
     // FIX: ДВИЖЕНИЕ — только один режим управления
     if (dist > 3.5) {
-      // Далеко: смотрим К цели, pathfinder управляет движением
-      try { await bot.look(yaw, -0.3, false); } catch {} // смотрим немного вниз — как игрок
       if (dist > 8) {
+        // Далеко: pathfinder сам управляет и поворотом и движением
+        // НЕ вызываем bot.look — это конфликтует с pathfinder и вызывает зависание на 15 блоках
         // Используем pathfinder для навигации через препятствия
         try {
           const { goals } = require('mineflayer-pathfinder');
-          // FIX: обновляем цель если pathfinder остановился, цель сместилась >1.5 блоков, или >800ms
-          // Баг был: _lastGoalPos.distanceTo(tpos) > 3 не срабатывал когда pathfinder
-          // уже достиг старой цели рядом с новой позицией цели — бот зависал
-          const _pfDone = !bot.pathfinder.goal;
+          // FIX: обновляем цель каждые 500мс или если цель сместилась > 1.5 блока
+          // Гарантирует что бот не зависнет когда pathfinder достиг старой позиции цели
           const _nowMs = Date.now();
-          const _needsGoalUpdate = !this._lastGoalPos ||
-            this._lastGoalPos.distanceTo(tpos) > 1.5 ||
-            _pfDone ||
-            (_nowMs - (this._lastGoalUpdate || 0)) > 800;
-          if (_needsGoalUpdate) {
+          if (!this._lastGoalPos || this._lastGoalPos.distanceTo(tpos) > 1.5 ||
+              (_nowMs - (this._lastGoalUpdate || 0)) > 500) {
             this._lastGoalPos = tpos.clone();
             this._lastGoalUpdate = _nowMs;
             bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), true);
@@ -310,7 +305,8 @@ class PvpController {
           try { bot.setControlState('forward', true); bot.setControlState('sprint', true); } catch {}
         }
       } else {
-        // 3.5-8 блоков: прямой контроль (pathfinder конфликтует на коротких дистанциях)
+        // 3.5-8 блоков: смотрим на цель + прямой контроль
+        try { await bot.look(yaw, -0.3, false); } catch {}
         try { bot.pathfinder?.stop(); } catch {}
         try { bot.setControlState('forward', true); bot.setControlState('sprint', true); } catch {}
       }
