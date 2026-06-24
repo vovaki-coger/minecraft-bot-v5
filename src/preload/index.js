@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     startPvp: (id, opts) => ipcRenderer.invoke("bot:startPvp", id, opts),
     stopPvp: (id) => ipcRenderer.invoke("bot:stopPvp", id),
     togglePvpMode: (id) => ipcRenderer.invoke("bot:togglePvpMode", id),
+    resetPvpBrain: () => ipcRenderer.invoke("bot:resetPvpBrain"),
     // ── Inventory interaction ───────────────────────────────────────
     clickItem: (id, slot, button) => ipcRenderer.invoke("bot:clickItem", id, slot, button),
     closeWindow: (id) => ipcRenderer.invoke("bot:closeWindow", id),
