@@ -370,7 +370,9 @@ class PvpController {
     try { await bot.look(yaw, pitch, true); } catch {}
     await sleep(30 + rand(0, 30));
 
-    const finalDist = bot.entity.position.distanceTo(tpos);
+    let finalDist;
+    try { finalDist = bot.entity.position.distanceTo(tpos); } catch { finalDist = dist; }
+    if (isNaN(finalDist)) finalDist = dist; // entity position temporarily invalid — use last known dist
     this._log(`📏 finalDist=${finalDist.toFixed(2)}`);
     if (finalDist > 3.5) {
       this._log(`⚠️ finalDist=${finalDist.toFixed(2)} > 3.5 — цель ушла пока смотрели`);
@@ -714,15 +716,57 @@ class PvpController {
     const { bot } = this.instance;
     if (!bot?.entity) { this._target = null; return; }
     let closest = null, minDist = 80;
+    const myPos = bot.entity.position;
+    const botName = (bot.username || '').toLowerCase();
+
     for (const e of Object.values(bot.entities || {})) {
       if (!e?.position || e === bot.entity) continue;
-      if (e.type !== "player" && e.type !== "mob") continue;
-      const uname = typeof e.username === "string" ? e.username.toLowerCase() : null;
-      if (uname && this._teammates.has(uname)) continue;
-      if (uname && uname === (bot.username || "").toLowerCase()) continue;
       if (e.isValid === false) continue;
-      const d = bot.entity.position.distanceTo(e.position);
-      if (d < minDist) { minDist = d; closest = e; }
+
+      // Accept by type OR by username (some servers temporarily set wrong type after damage)
+      const hasUsername = typeof e.username === 'string' && e.username.length > 0;
+      const isPlayer = e.type === 'player' || hasUsername;
+      const isMob    = e.type === 'mob' || e.type === 'hostile';
+      if (!isPlayer && !isMob) continue;
+
+      const uname = hasUsername ? e.username.toLowerCase() : null;
+      if (uname && this._teammates.has(uname)) continue;
+      if (uname && uname === botName) continue;
+
+      let d;
+      try { d = myPos.distanceTo(e.position); } catch { continue; }
+      if (isNaN(d) || d >= minDist) continue;
+      minDist = d; closest = e;
+    }
+
+    // Fallback: entity may have been temporarily removed from bot.entities
+    // bot.players keeps separate references — check there too
+    if (!closest && this._lastTargetName) {
+      try {
+        // bot.players is a map: username -> { entity, ping, gamemode, ... }
+        const players = bot.players || {};
+        // Try exact key first, then case-insensitive scan
+        let pe = players[this._lastTargetName]
+               || Object.values(players).find(p =>
+                    typeof p.username === 'string' &&
+                    p.username.toLowerCase() === this._lastTargetName);
+        if (pe?.entity?.position) {
+          let d;
+          try { d = myPos.distanceTo(pe.entity.position); } catch {}
+          if (!isNaN(d) && d < 80 && pe.entity !== bot.entity) {
+            closest = pe.entity;
+            this._log('🔄 Цель переподключена через bot.players: ' + this._lastTargetName);
+          }
+        }
+      } catch {}
+    }
+
+    if (closest) {
+      const uname = typeof closest.username === 'string' ? closest.username.toLowerCase() : null;
+      if (uname) this._lastTargetName = uname;
+      this._targetLostAt = 0;
+    } else if (this._target && !this._targetLostAt) {
+      this._targetLostAt = Date.now();
     }
     this._target = closest;
   }
