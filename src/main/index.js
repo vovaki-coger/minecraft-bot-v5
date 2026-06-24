@@ -119,6 +119,22 @@ function setupIpcHandlers() {
   ipcMain.handle("bot:startPvp", (_e, botId, opts) => botManager.startPvpTask(botId, opts));
   ipcMain.handle("bot:stopPvp", (_e, botId) => botManager.stopPvpMode(botId));
   ipcMain.handle("bot:togglePvpMode", (_e, botId) => botManager.togglePvpMode(botId));
+  // Сброс весов нейросети — удаляем pvp-weights.json → при следующем старте PVP переобучится
+  ipcMain.handle("bot:resetPvpBrain", async () => {
+    const fs = require("fs");
+    const weightsPath = path.join(__dirname, "../../pvp-weights.json");
+    try {
+      if (fs.existsSync(weightsPath)) {
+        fs.unlinkSync(weightsPath);
+        log.info("[PvpBrain] Веса сброшены: " + weightsPath);
+        return { ok: true, path: weightsPath };
+      }
+      return { ok: false, reason: "Файл не найден — уже сброшен или ещё не создан" };
+    } catch (err) {
+      log.error("[PvpBrain] Ошибка сброса весов:", err.message);
+      return { ok: false, reason: err.message };
+    }
+  });
 
   // ── Inventory click ───────────────────────────────────────────────────────
   ipcMain.handle("bot:clickItem", (_e, botId, slot, button) => botManager.clickInventorySlot(botId, slot, button));
