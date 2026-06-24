@@ -372,6 +372,8 @@ class BotManager {
         instance.stats.x = Math.round(bot.entity.position.x);
         instance.stats.y = Math.round(bot.entity.position.y);
         instance.stats.z = Math.round(bot.entity.position.z);
+        // FIX: эмитируем координаты в рендерер (раньше не отправлялись)
+        this.emit("bot:statsUpdated", { botId, stats: instance.stats });
       }
       // ── Авто-еда: кушаем когда голод < 16/20 (раз в ~5 сек) ──────
       // Анти-чит: НЕЛЬЗЯ есть во время движения.
@@ -1041,9 +1043,16 @@ class BotManager {
     try {
       const agent = this._proxyAgent(proxyStr);
       const { default: fetch } = await import("node-fetch");
-      const resp = await fetch("https://api.ipify.org?format=json", { agent, timeout: 10000 });
-      const data = await resp.json();
-      return { success: true, ip: data.ip };
+      // FIX: node-fetch v3 не поддерживает timeout — используем AbortController
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      try {
+        const resp = await fetch("https://api.ipify.org?format=json", { agent, signal: controller.signal });
+        const data = await resp.json();
+        return { success: true, ip: data.ip };
+      } finally {
+        clearTimeout(timer);
+      }
     } catch (err) {
       return { success: false, error: err.message };
     }
