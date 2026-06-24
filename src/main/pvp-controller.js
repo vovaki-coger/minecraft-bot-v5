@@ -122,6 +122,12 @@ class PvpController {
     this._onHurt = () => {
       const currentHP = bot.health ?? 20;
       if (currentHP < this._lastHP - 0.5) {
+        // FIX: если бот в воздухе (прыжок крита) и получил урон — немедленно сбрасываем jump
+        // Иначе бот зависает в воздухе после нокбэка
+        if (!bot.entity?.onGround) {
+          try { bot.setControlState('jump', false); } catch {}
+          log.debug("[PvpController] 🔽 Сброс jump — получили урон в воздухе");
+        }
         if (!this._isEating && this._isDoingAction) {
           if (currentHP <= 1) {
             log.debug("[PvpController] 🛡️ Тотем сработал — продолжаем лечение");
@@ -332,7 +338,9 @@ class PvpController {
       } else {
         // 3.5-8 блоков: смотрим на цель + прямой контроль
         this._log(`🏃 Спринт к цели dist=${dist.toFixed(2)}`);
-        try { await bot.look(yaw, -0.3, false); } catch {}
+        // FIX: pitch=-0.3 было "смотреть вверх" — теперь прицел на тело цели (pitch≥0)
+        const sprintPitch = Math.max(pitch, 0.05);
+        try { await bot.look(yaw, sprintPitch, false); } catch {}
         try { bot.pathfinder?.stop(); } catch {}
         try { bot.setControlState('forward', true); bot.setControlState('sprint', true); } catch {}
       }
@@ -399,32 +407,46 @@ class PvpController {
 
     if (doCrit) {
       try { bot.setControlState('jump', true); } catch {}
-      // Ждём отрыва от земли
+      // Ждём отрыва от земли (макс 350мс — защита от вечного ожидания)
       let waited = 0;
-      while (bot.entity.onGround && waited < 300) { await sleep(20); waited += 20; }
+      while (bot.entity.onGround && waited < 350) { await sleep(20); waited += 20; }
       try { bot.setControlState('jump', false); } catch {}
 
-      // Ждём пик (~150мс от отрыва)
-      await sleep(150 + rand(0, 30));
+      // Ждём пик прыжка (~130мс от отрыва)
+      await sleep(130 + rand(0, 20));
 
-      // FIX: Пересчёт прицела по ТЕКУЩЕЙ позиции цели (не старой!)
+      // FIX: прицел на ТЕЛО цели (y+1.0 = центр тела), НЕ на голову и не в небо
+      // Во время прыжка бот выше → pitch автоматически смотрит ВНИЗ на тело
       const freshTarget = this._target;
       if (freshTarget?.position) {
-        const cp   = bot.entity.position;
+        const cp    = bot.entity.position;
         const ftpos = freshTarget.position;
-        const ndx  = ftpos.x - cp.x;
-        const ndz  = ftpos.z - cp.z;
-        const nd2d = Math.max(Math.sqrt(ndx*ndx + ndz*ndz), 0.01);
-        const freshAimY = ftpos.y + (freshTarget.type === 'player' ? 0.85 : (freshTarget.height || 1.8) * 0.5);
+        const ndx   = ftpos.x - cp.x;
+        const ndz   = ftpos.z - cp.z;
+        const nd2d  = Math.max(Math.sqrt(ndx*ndx + ndz*ndz), 0.01);
+        // Прицел на центр тела (y+1.0), не на голову (y+1.8) и не в воздух
+        const aimBodyY = ftpos.y + 1.0;
         const newYaw   = Math.atan2(-ndx, -ndz);
-        const newPitch = -Math.atan2(freshAimY - (cp.y + 1.62), nd2d);
+        // pitch > 0 = смотреть вниз; Clamp чтобы никогда не смотреть вверх
+        const rawPitch = -Math.atan2(aimBodyY - (cp.y + 1.62), nd2d);
+        const newPitch = Math.max(rawPitch, 0.10); // минимум 0.10 = всегда вниз
         try { await bot.look(newYaw, newPitch, true); } catch {}
       }
       await sleep(20);
 
+      // FIX: защита от зависания — если всё ещё в воздухе, ждём приземления (макс 400мс)
+      let airWait = 0;
+      while (!bot.entity.onGround && airWait < 400) { await sleep(20); airWait += 20; }
+      if (!bot.entity.onGround) {
+        // Не приземлились — принудительно сбрасываем прыжок и пропускаем крит
+        try { bot.setControlState('jump', false); } catch {}
+        this._log('⚠️ Завис в воздухе — пропускаем крит, ждём земли');
+        return;
+      }
+
       // Проверяем дистанцию снова после прыжка
       if (this._target && bot.entity.position.distanceTo(this._target.position) > 3.8) {
-        // Цель убежала пока прыгали — не атакуем
+        this._log('⚠️ Цель убежала во время прыжка — отменяем удар');
         return;
       }
     }
