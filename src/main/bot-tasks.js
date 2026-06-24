@@ -67,6 +67,7 @@ class TaskManager {
         case "farm_trees_full": await this._taskFarmTreesFull(args); break;
         // PvP-игрок с крит-ударами
         case "pvp_player":    await this._taskPvpPlayer(args); break;
+        case "excavate":      await this._taskExcavate(args); break;
         case "inventory":     this._reportInventory(); break;
         case "status":        this._reportStatus(); break;
         default:              this._chat("Не знаю как это сделать");
@@ -847,6 +848,57 @@ class TaskManager {
   }
 
   // ── Вспомогательные ─────────────────────────────────────────────────────
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // РАСКОПКА ТЕРРИТОРИИ: копаем все блоки между двумя координатами
+  // ──────────────────────────────────────────────────────────────────────────
+  async _taskExcavate(args) {
+    const { x1, y1, z1, x2, y2, z2 } = args || {};
+    if (x1 == null || y1 == null || z1 == null || x2 == null || y2 == null || z2 == null) {
+      this._chat('Укажи две точки: x1 y1 z1 x2 y2 z2');
+      return;
+    }
+    const Vec3 = require('vec3');
+    const minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
+    const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
+    const minZ = Math.min(z1, z2), maxZ = Math.max(z1, z2);
+    const total = (maxX-minX+1) * (maxY-minY+1) * (maxZ-minZ+1);
+    this._chat(`⛏ Начинаю раскопку: ${maxX-minX+1}x${maxY-minY+1}x${maxZ-minZ+1} = ${total} блоков`);
+    let dug = 0, skipped = 0;
+    const SKIP = new Set(['air','water','lava','void_air','cave_air']);
+
+    // Копаем сверху вниз, слой за слоем
+    for (let y = maxY; y >= minY && this._running; y--) {
+      for (let x = minX; x <= maxX && this._running; x++) {
+        for (let z = minZ; z <= maxZ && this._running; z++) {
+          const block = this.bot.blockAt(new Vec3(x, y, z));
+          if (!block || SKIP.has(block.name) || !block.diggable) { skipped++; continue; }
+
+          // Подходим к блоку
+          try {
+            await this.bot.pathfinder.goto(
+              new goals.GoalNear(x, y, z, 3)
+            ).catch(() => {});
+          } catch { continue; }
+
+          if (!this._running) break;
+
+          // Перечитываем блок (мог упасть пока шли)
+          const b2 = this.bot.blockAt(new Vec3(x, y, z));
+          if (!b2 || SKIP.has(b2.name) || !b2.diggable) { skipped++; continue; }
+
+          try {
+            await this.bot.dig(b2);
+            dug++;
+            if (dug % 16 === 0) {
+              this._log(`⛏ Раскопка: ${dug}/${total - skipped} блоков`);
+            }
+          } catch { skipped++; }
+        }
+      }
+    }
+    this._chat(`✅ Раскопка завершена! Выкопано: ${dug}, пропущено: ${skipped}`);
+  }
 
   async _gotoNearest(pos, range = 3) {
     await this.bot.pathfinder.goto(
