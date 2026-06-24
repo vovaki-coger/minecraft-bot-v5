@@ -1206,6 +1206,181 @@ function buildSeedData() {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // +360 000 НОВЫХ СЦЕНАРИЕВ v4.0 — полное покрытие паттернов движения/атаки
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const rnd  = (a,b) => a + Math.random()*(b-a);
+    const pick = arr  => arr[Math.floor(Math.random()*arr.length)];
+
+    // ── БЛОК P: 90 000 — точный тайминг атаки (CD-оптимизация) ─────────────
+    // Цель: научить бота ВСЕГДА атаковать когда CD >= 0.85 + dist <= 0.30
+    // и НИКОГДА не атаковать раньше (потеря урона из-за сниженного CD)
+    for (let i = 0; i < 90000; i++) {
+      const dist   = rnd(0.02, 0.35);
+      const bHp    = rnd(0.20, 1.0);
+      const tHp    = rnd(0.05, 1.0);
+      const hunger = rnd(0.50, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const hasBf  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk = 0, str = 0, perk = 0;
+      if (cd >= 0.90 && dist <= 0.28) {
+        // Идеальный удар: CD полный + близко
+        atk = clamp(cd * 0.97 + (1-tHp)*0.03, 0.85, 1.0);
+        str = tHp < 0.12 ? 0 : 0.05;  // не страфим при добивании
+      } else if (cd >= 0.80 && dist <= 0.22) {
+        // Почти готов + вплотную — бьём
+        atk = clamp(cd * 0.92, 0.72, 0.97);
+        str = 0.10;
+      } else if (cd >= 0.70 && dist <= 0.15) {
+        // Средний CD + вплотную — слабый удар но бьём
+        atk = clamp(cd * 0.82, 0.55, 0.90);
+        str = 0.18;
+      } else if (cd < 0.70) {
+        // CD не готов — страфим
+        str = clamp((1-cd)*0.75+0.25, 0.30, 0.95);
+        atk = 0;
+      } else {
+        // CD готов но далеко — сближаемся
+        str = clamp(0.60+(dist-0.28)*0.8, 0.50, 0.92);
+        atk = 0;
+      }
+      if (hasBf && bHp > 0.70 && atk < 0.3) perk = 0.45;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,hasBf,cd,0,0.1], atk,0,0,0,0,perk,str);
+    }
+
+    // ── БЛОК Q: 90 000 — выживание под давлением ────────────────────────────
+    // Несколько врагов + низкое HP → точные решения: лечиться/есть/отступать
+    for (let i = 0; i < 90000; i++) {
+      const dist   = rnd(0.0, 0.90);
+      const bHp    = rnd(0.0, 0.45);   // всегда низкое HP
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.0, 0.80);
+      const cd     = rnd(0.0, 1.0);
+      const enemy  = rnd(0.15, 1.0);   // есть враги
+      const ally   = rnd(0.0, 0.50);
+      const hasHl  = pick([0,1]);
+      const hasFd  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk=0, ret=0, eat=0, heal=0, str=0;
+      const pressure = clamp(enemy*(1-bHp*2), 0, 1);
+
+      if (bHp < 0.07) {
+        // Умираем: только спасаться
+        heal = hasHl ? clamp(0.90+(0.07-bHp)*5, 0.85, 0.99) : 0;
+        ret  = !heal ? 0.97 : clamp(0.60-ally*0.3, 0.25, 0.80);
+      } else if (bHp < 0.20 && hasHl) {
+        heal = clamp(0.78+(0.20-bHp)*2.5, 0.65, 0.94);
+        ret  = clamp(0.40+pressure*0.35, 0.20, 0.80);
+      } else if (bHp < 0.35 && hasFd && hunger < 0.55) {
+        eat  = clamp(0.65+(0.35-bHp)*1.8, 0.45, 0.88);
+        ret  = pressure > 0.5 ? clamp(pressure*0.55, 0.25, 0.70) : 0;
+      } else if (bHp < 0.45 && enemy > 0.60) {
+        // Несколько врагов + среднее HP → отступаем
+        ret  = clamp(0.35+pressure*0.50, 0.25, 0.88);
+        str  = clamp(0.40-ret*0.25, 0.10, 0.55);
+        atk  = ally > 0.40 && dist < 0.20 && cd > 0.88 ? 0.55 : 0;
+      } else {
+        // Среднее HP + нормальное давление — атакуем если CD готов
+        atk  = dist < 0.28 && cd > 0.82 ? clamp(cd*0.85, 0.55, 0.92) : 0;
+        str  = !atk ? clamp(0.55+(1-cd)*0.35, 0.35, 0.88) : 0.12;
+        ret  = 0;
+      }
+      if (ally > 0.35) { atk = clamp(atk*1.20, 0, 1.0); ret = clamp(ret*0.65, 0, 1); }
+      label([dist,bHp,tHp,hpDiff,hunger,1,hasFd,hasHl,0,cd,ally,enemy], atk,ret,eat,heal,0,0,str);
+    }
+
+    // ── БЛОК R: 90 000 — добивание (kill confirmation) ───────────────────────
+    // Враг на ≤20% HP → максимальная атака НЕСМОТРЯ на своё HP
+    for (let i = 0; i < 90000; i++) {
+      const dist   = rnd(0.0, 0.50);
+      const bHp    = rnd(0.15, 1.0);
+      const tHp    = rnd(0.01, 0.20);  // враг почти мёртв
+      const hunger = rnd(0.40, 1.0);
+      const cd     = rnd(0.60, 1.0);  // CD почти всегда готов
+      const hasHl  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk = 0, str = 0, heal = 0, ret = 0;
+
+      if (dist > 0.30) {
+        // Догоняем убегающего врага — максимальный стрейф
+        str = clamp(0.88 + (1-dist)*0.10, 0.75, 0.98);
+        atk = dist < 0.38 && cd > 0.90 ? 0.65 : 0;
+      } else if (bHp < 0.12 && hasHl && tHp > 0.08) {
+        // Мы сами умираем — сначала хил, потом добиваем
+        heal = clamp(0.82+(0.12-bHp)*5, 0.75, 0.97);
+        ret  = 0.25;
+      } else {
+        // Добиваем! Все ресурсы на атаку
+        const tPercent = tHp / 0.20; // 0=совсем мёртв, 1=20%HP
+        atk = clamp(cd * (1.0 - tPercent*0.08), 0.80, 1.0);
+        str = tHp < 0.07 ? 0 : 0.04;  // совсем не страфим при 1HP
+      }
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,hasHl,0,cd,0,0.1], atk,ret,0,heal,0,0,str);
+      // Вариант с тотемом (tHp почти 0 — враг активирует тотем — не останавливаемся)
+      if (tHp < 0.05) {
+        label([dist,bHp,0.01,hpDiff,hunger,1,0,0,0,cd,0,0.1], 1.0,0,0,0,0,0,0);
+      }
+    }
+
+    // ── БЛОК S: 90 000 — мастерство движения ─────────────────────────────────
+    // Обучаем: когда двигаться, куда, как быстро — по дистанции и CD
+    for (let i = 0; i < 90000; i++) {
+      const dist   = rnd(0.0, 1.0);
+      const bHp    = rnd(0.25, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.50, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const sword  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+
+      let atk = 0, str = 0;
+
+      if (dist > 0.80) {
+        // Очень далеко — бежим без остановок
+        str = clamp(0.92 + (1-dist)*0.07, 0.85, 1.0);
+        atk = 0;
+      } else if (dist > 0.50) {
+        // Далеко — бежим, можем применять бафы
+        str = clamp(0.80 + (1-dist)*0.12, 0.72, 0.92);
+        atk = (dist < 0.55 && cd > 0.93 && sword) ? 0.28 : 0;
+      } else if (dist > 0.30) {
+        // Средняя дистанция — смотрим CD
+        if (cd > 0.82 && sword) {
+          str = 0.30;  // сближаемся немного
+          atk = clamp(cd*0.75, 0.55, 0.88);
+        } else {
+          str = clamp(0.55 + (0.80-cd)*0.35, 0.40, 0.88);
+          atk = 0;
+        }
+      } else if (dist > 0.18) {
+        // Ближняя дистанция
+        if (cd > 0.78 && sword) {
+          atk = clamp(cd*0.90, 0.65, 0.97);
+          str = 0.12;
+        } else {
+          // CD не готов — страфим вокруг цели
+          str = clamp(0.60 + (0.78-cd)*0.55, 0.35, 0.90);
+          atk = 0;
+        }
+      } else {
+        // Вплотную — атакуем или страфим
+        if (cd > 0.72 && sword) {
+          atk = clamp(cd*0.94, 0.70, 0.98);
+          str = 0.04;
+        } else {
+          str = clamp(0.45 + (0.72-cd)*0.70, 0.28, 0.82);
+          atk = cd > 0.55 ? cd*0.35 : 0;
+        }
+      }
+      label([dist,bHp,tHp,hpDiff,hunger,sword,0,0,0,cd,rnd(0,0.5),rnd(0,0.3)], atk,0,0,0,0,0,str);
+    }
+  }
+
   log.info(`[PvpBrain] Сгенерировано ${data.length} обучающих сценариев`);
   return data;
 }
