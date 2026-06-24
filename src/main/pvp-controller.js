@@ -1,5 +1,5 @@
 /**
- * PvpController v5.1 — FIXES:
+ * PvpController v5.2 — FIXES:
  * - Line-of-sight проверка перед атакой (не бьём сквозь блоки)
  * - _isEating флаг: удар не прерывает еду
  * - Криты: пересчёт прицела по ЖИВОЙ позиции цели после прыжка
@@ -181,18 +181,19 @@ class PvpController {
       this._findTarget();
       this._scanNearby80();
 
-      // FIX: нет цели, но HP низкий — всё равно едим
+      // Нет цели — следуем за тимейтом, едим если надо
       if (!this._target) {
-        try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
         const hp   = bot.health ?? 20;
         const food = bot.food   ?? 20;
         if (!this._isDoingAction && !this._isEating) {
           const eatMode = this._shouldEatNoCombat(hp, food);
           if (eatMode) {
             await this._doEatSmart(bot, eatMode);
+          } else {
+            await this._followTeammate(bot); // следуем за тимейтом пока нет врагов
           }
         }
-        this._scheduleTick(600);
+        this._scheduleTick(500);
         return;
       }
 
@@ -210,12 +211,6 @@ class PvpController {
         this._isEating = false;
         this._isDoingAction = false;
       }
-      // FIX: цель появилась пока ели → прерываем еду если HP не критический
-      if (this._isEating && this._target && (bot.health ?? 20) > 6) {
-        this._isEating = false;
-        this._isDoingAction = false;
-      }
-
       if (this._isDoingAction || this._isEating) { this._scheduleTick(150); return; }
 
       // 1. ЭКСТРЕННОЕ ЛЕЧЕНИЕ (HP ≤ 4)
@@ -408,11 +403,13 @@ class PvpController {
 
   // ── HP-ЛОГИКА ЕДЫ (во время боя) ─────────────────────────────────────────
   _shouldEat(hp, food) {
-    // ТОЛЬКО критические пороги — не прерываем бой лишний раз
-    if (hp <= 6)  return "gapple";                // критически низко — гапл
-    if (hp <= 10) return "gapple_if_have";        // низко — гапл если есть
-    if (food < 6) return "regular";               // рефген стоит — просто поесть
-    return null;
+    // Схема юзера: HP≤10 → если голоден (food<18) ешь еду → всегда гапл
+    //              HP≤10 → если сыт (food≥18) → сразу гапл
+    if (hp <= 10) {
+      if (food < 18) return "food_then_gapple";   // сначала еда, потом гапл
+      return "gapple";                             // сразу гапл
+    }
+    return null; // выше 10HP — не едим, продолжаем биться
   }
 
   // FIX: Еда без цели (вне боя)
@@ -437,6 +434,14 @@ class PvpController {
 
       if (mode === "gapple") {
         await this._eatBestGapple(bot);
+      } else if (mode === "food_then_gapple") {
+        // Схема юзера: сначала обычная еда (мясо/морковь/etc), ПОТОМ гапл
+        const regularFood = this._selectRegularFood(bot);
+        if (regularFood) {
+          await this._eatItem(bot, regularFood);
+          await sleep(80 + rand(0, 40)); // небольшая пауза между едой и гаплом
+        }
+        await this._eatBestGapple(bot); // гапл всегда, независимо от HP
       } else if (mode === "gapple_if_have") {
         const had = await this._eatBestGapple(bot);
         if (!had) { const food = this._selectRegularFood(bot); if (food) await this._eatItem(bot, food); }
@@ -453,7 +458,7 @@ class PvpController {
     } finally {
       this._isEating      = false;
       this._isDoingAction = false;
-      this._forceAttack   = 3;   // FIX: 3 тика (не 5) — быстрее возвращаемся к бою
+      this._forceAttack   = 15;  // 15 тиков × 80мс = 1.2с боя после еды
     }
   }
 
@@ -612,6 +617,58 @@ class PvpController {
     });
     if (!debuff) return;
     await this._doSplashPotion(bot, 'debuff', debuff);
+  }
+
+  // ── СЛЕДОВАНИЕ ЗА ТИМЕЙТОМ (когда нет цели) ────────────────────────────
+  async _followTeammate(bot) {
+    if (!bot?.entity) return;
+    try {
+      // Ищем ближайшего тимейта в зоне видимости
+      let nearestTeam = null;
+      let minD = 100;
+      for (const e of Object.values(bot.entities || {})) {
+        if (!e?.position || e === bot.entity || e.type !== 'player') continue;
+        const uname = typeof e.username === 'string' ? e.username.toLowerCase() : null;
+        if (!uname) continue;
+        if (!this._teammates.has(uname)) continue; // только тимейты
+        const d = bot.entity.position.distanceTo(e.position);
+        if (d < minD) { minD = d; nearestTeam = e; }
+      }
+
+      if (!nearestTeam) {
+        // Тимейтов нет рядом — стоим
+        try { bot.pathfinder?.stop(); } catch {}
+        try { bot.setControlState('forward', false); bot.setControlState('sprint', false); } catch {}
+        return;
+      }
+
+      if (minD < 4) {
+        // Уже рядом — стоим
+        try { bot.pathfinder?.stop(); } catch {}
+        try { bot.setControlState('forward', false); bot.setControlState('sprint', false); } catch {}
+        return;
+      }
+
+      // Идём к тимейту
+      try {
+        const { goals } = require('mineflayer-pathfinder');
+        const tpos = nearestTeam.position;
+        if (!this._followGoalPos || this._followGoalPos.distanceTo(tpos) > 3) {
+          this._followGoalPos = tpos.clone();
+          bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2.5), false);
+        }
+      } catch {
+        // Фоллбэк: прямой контроль
+        const tpos = nearestTeam.position;
+        const dx = tpos.x - bot.entity.position.x;
+        const dz = tpos.z - bot.entity.position.z;
+        const yaw = Math.atan2(-dx, -dz);
+        try { await bot.look(yaw, 0, false); } catch {}
+        try { bot.setControlState('forward', true); bot.setControlState('sprint', minD > 8); } catch {}
+      }
+    } catch (err) {
+      log.debug('[PvpController] followTeammate:', err.message);
+    }
   }
 
   // ── ПОИСК ЦЕЛИ ────────────────────────────────────────────────────────────
