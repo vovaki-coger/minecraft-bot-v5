@@ -145,6 +145,11 @@ class PvpController {
     log.info(`[PvpController] v5.1 started team=[${[...this._teammates].join(",")}]`);
   }
 
+  _log(msg) {
+    try { log.debug('[PvpController] ' + msg); } catch {}
+    try { this.emit('pvp:log', msg); } catch {}
+  }
+
   stop() {
     this._running = false;
     if (this._loopTimer) { clearTimeout(this._loopTimer); this._loopTimer = null; }
@@ -183,6 +188,7 @@ class PvpController {
 
       // Нет цели — следуем за тимейтом, едим если надо
       if (!this._target) {
+        this._log('🔍 Цель не найдена — ждём врага в радиусе 24 блоков');
         const hp   = bot.health ?? 20;
         const food = bot.food   ?? 20;
         if (!this._isDoingAction && !this._isEating) {
@@ -200,6 +206,11 @@ class PvpController {
       const hp   = bot.health ?? 20;
       const food = bot.food   ?? 20;
       const dist = bot.entity.position.distanceTo(this._target.position);
+
+      // Лог каждые 5 тиков
+      if (this._tickCount % 5 === 0) {
+        this._log(`📊 HP=${hp.toFixed(1)} еда=${food} dist=${dist.toFixed(1)} цель=${this._target?.username||this._target?.name||'?'} eating=${this._isEating} forceAtk=${this._forceAttack}`);
+      }
 
       // Сброс зависших действий (не еды — у еды свой флаг)
       if (this._isDoingAction && !this._isEating && Date.now() - this._actionStartedAt > 3000) {
@@ -220,11 +231,18 @@ class PvpController {
       }
 
       // 2. ЕДА по HP-логике
+      // FIX: не едим если враг < 6 блоков (атакуем сначала, иначе вечный цикл еды)
       const eatMode = this._shouldEat(hp, food);
-      if (eatMode && this._forceAttack === 0) {
+      if (eatMode && this._forceAttack === 0 && dist > 6) {
+        this._log(`🍗 Едим: HP=${hp.toFixed(1)}, режим=${eatMode}, dist=${dist.toFixed(1)}`);
         await this._doEatSmart(bot, eatMode);
+        // FIX: форсируем атаку после еды — иначе следующий тик снова съест!
+        this._forceAttack = 5;
         this._scheduleTick(350);
         return;
+      }
+      if (eatMode && dist <= 6) {
+        this._log(`⚔️ Враг близко dist=${dist.toFixed(1)} — бьём, не едим (HP=${hp.toFixed(1)})`);
       }
 
       // 3. Принудительная атака после еды/зелья
@@ -252,7 +270,10 @@ class PvpController {
   }
 
   async _doMoveAndAttack(bot, dist) {
-    if (this._isDoingAction || this._isEating) return;
+    if (this._isDoingAction || this._isEating) {
+      this._log(`⏸ заблокирован: doingAction=${this._isDoingAction} eating=${this._isEating}`);
+      return;
+    }
     const target = this._target;
     if (!target?.position || !bot.entity) return;
 
@@ -284,6 +305,7 @@ class PvpController {
     }
 
     // FIX: ДВИЖЕНИЕ — только один режим управления
+    this._log(`🗺 dist=${dist.toFixed(2)} → ${dist>8?"PATHFINDER (>8)":dist>3.5?"СПРИНТ (3.5-8)":"АТАКА (≤3.5)"}`);
     if (dist > 3.5) {
       if (dist > 8) {
         // Далеко: pathfinder сам управляет и поворотом и движением
@@ -298,7 +320,7 @@ class PvpController {
               (_nowMs - (this._lastGoalUpdate || 0)) > 500) {
             this._lastGoalPos = tpos.clone();
             this._lastGoalUpdate = _nowMs;
-            bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), true);
+            this._log(`🏃 Pathfinder → X=${Math.round(tpos.x)} Z=${Math.round(tpos.z)} dist=${dist.toFixed(1)}`); bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), true);
           }
         } catch {
           // Фоллбэк: прямой контроль
@@ -306,6 +328,7 @@ class PvpController {
         }
       } else {
         // 3.5-8 блоков: смотрим на цель + прямой контроль
+        this._log(`🏃 Спринт к цели dist=${dist.toFixed(2)}`);
         try { await bot.look(yaw, -0.3, false); } catch {}
         try { bot.pathfinder?.stop(); } catch {}
         try { bot.setControlState('forward', true); bot.setControlState('sprint', true); } catch {}
@@ -329,30 +352,35 @@ class PvpController {
       try { await bot.equip(weapon, 'hand'); await sleep(45 + rand(0,20)); } catch {}
     }
 
+    this._log(`⚔️ ЗОНА УДАРА dist=${dist.toFixed(2)} оружие=${weapon?.name||'нет'} onGround=${bot.entity.onGround}`);
     // КД атаки
-    if (Date.now() - this._lastAttackMs < weaponCD) return;
+    const _cdLeft = weaponCD - (Date.now() - this._lastAttackMs);
+    if (_cdLeft > 0) { this._log(`⏳ КД оружия ${_cdLeft}мс`); return; }
 
-    // FIX: LINE-OF-SIGHT — не бьём сквозь блоки
-    if (!hasLineOfSight(bot, target)) {
-      log.debug("[PvpController] Нет LoS — цель за блоком");
-      // Пытаемся обойти: двигаемся к цели
+    // FIX: LoS — при dist < 2.5 всегда бьём (вплотную), иначе проверяем
+    const _los = dist < 2.5 || hasLineOfSight(bot, target);
+    if (!_los) {
+      this._log(`👁 Нет LoS — цель за блоком dist=${dist.toFixed(2)}`);
       try { bot.setControlState('forward', true); } catch {}
       return;
     }
+    this._log(`👁 LoS OK dist=${dist.toFixed(2)}`);
 
     // Прицел + look
     try { await bot.look(yaw, pitch, true); } catch {}
     await sleep(30 + rand(0, 30));
 
     const finalDist = bot.entity.position.distanceTo(tpos);
+    this._log(`📏 finalDist=${finalDist.toFixed(2)}`);
     if (finalDist > 3.5) {
+      this._log(`⚠️ finalDist=${finalDist.toFixed(2)} > 3.5 — цель ушла пока смотрели`);
       try { bot.setControlState('forward', true); } catch {}
       return;
     }
 
     // FIX: КРИТ — каждый 2-й удар (1 крит, 1 обычный)
-    // Убеждаемся что стоим на земле перед крит-прыжком
     const doCrit = bot.entity.onGround && (this._hitCount % 2 === 0) && finalDist < 3.0;
+    this._log(`🎯 АТАКУЕМ! hitCount=${this._hitCount} doCrit=${doCrit} onGround=${bot.entity.onGround}`);
 
     if (doCrit) {
       try { bot.setControlState('jump', true); } catch {}
@@ -392,7 +420,12 @@ class PvpController {
       this._lastAttackMs = Date.now();
       this._attackCount++;
       this._hitCount++;
-      if (doCrit) { this._critCount++; log.debug('[PvpController] 💥 КРИТ #' + this._critCount); }
+      if (doCrit) {
+        this._critCount++;
+        this._log(`💥 КРИТ #${this._critCount} | атак=${this._attackCount}`);
+      } else {
+        this._log(`🗡 Удар #${this._attackCount} обычный`);
+      }
       // W-TAP
       try { bot.setControlState('forward', false); } catch {}
       await sleep(45 + rand(0, 25));
