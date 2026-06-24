@@ -191,15 +191,17 @@ class PvpController {
         this._log('🔍 Цель не найдена — ждём врага в радиусе 24 блоков');
         const hp   = bot.health ?? 20;
         const food = bot.food   ?? 20;
-        if (!this._isDoingAction && !this._isEating) {
+        // Skip eating while sticky target is still fresh (entity temporarily gone)
+        const stickyFresh = this._stickyTargetTs && (Date.now() - this._stickyTargetTs < 5000);
+        if (!stickyFresh && !this._isDoingAction && !this._isEating) {
           const eatMode = this._shouldEatNoCombat(hp, food);
           if (eatMode) {
             await this._doEatSmart(bot, eatMode);
           } else {
-            await this._followTeammate(bot); // следуем за тимейтом пока нет врагов
+            await this._followTeammate(bot);
           }
         }
-        this._scheduleTick(500);
+        this._scheduleTick(stickyFresh ? 150 : 500);
         return;
       }
 
@@ -567,11 +569,52 @@ class PvpController {
   async _autoBuffPotions(bot) {
     if (this._isDoingAction || this._isEating || !this._target) return;
     const hp = bot.health ?? 20;
-    // Бафаем при хорошем HP (> 12) если есть буф-зелья
     if (hp < 12) return;
+
     const items = bot.inventory.items();
+    if (!items.length) return;
+
+    // effectId → keyword (Minecraft vanilla effect IDs)
+    const EFFECT_MAP = {
+      1:  'speed',
+      5:  'strength',
+      3:  'haste',
+      8:  'jump',
+      11: 'resistance',
+      12: 'fire_resistance',
+      22: 'absorption',
+    };
+
+    const enemyEffects = this._target.effects || {};
+    const myEffects    = bot.entity?.effects || {};
+
+    // 1. Match enemy buffs — use same type, prefer same strength
+    for (const [idStr, keyword] of Object.entries(EFFECT_MAP)) {
+      const eid = Number(idStr);
+      const enemyFx = enemyEffects[eid];
+      const myFx    = myEffects[eid];
+      if (!enemyFx) continue;
+      const enemyAmp = enemyFx.amplifier ?? 0;
+      if (myFx && (myFx.amplifier ?? 0) >= enemyAmp) continue;
+
+      const candidates = items.filter(i => i.name.toLowerCase().includes(keyword));
+      if (!candidates.length) continue;
+      const strong = enemyAmp >= 1
+        ? candidates.find(i => { const n = i.name.toLowerCase(); return n.includes('strong') || n.includes('_ii'); })
+        : null;
+      const chosen = strong || candidates[0];
+      this._log(`🧪 Матчим бафф врага: ${keyword} (ур.${enemyAmp+1}) → ${chosen.name}`);
+      await this._applyPotionOnSelf(bot, chosen);
+      return;
+    }
+
+    // 2. General buff if we have no active buff effects
+    const hasAnyBuff = Object.keys(myEffects).some(id => EFFECT_MAP[Number(id)] !== undefined);
+    if (hasAnyBuff) return;
+
     const buff = items.find(i => BUFF_POTION.some(k => i.name.toLowerCase().includes(k)));
     if (!buff) return;
+    this._log(`🧪 Бафф (нет активных эффектов): ${buff.name}`);
     await this._applyPotionOnSelf(bot, buff);
   }
 
