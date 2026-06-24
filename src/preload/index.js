@@ -69,7 +69,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   shell: { openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url) },
   on: (channel, cb) => {
     const allowedChannels = [
-      "bot:created", "bot:deleted", "bot:statusChanged", "bot:statsUpdated",
+      "bot:created", "bot:deleted", "bot:statusChanged", "bot:statsUpdated", "bot:actionLog",
       "bot:chat", "bot:serverMessage", "bot:aiMessage", "bot:aiChatMessage",
       "bot:death", "bot:error", "bot:actionStopped", "bot:inventoryUpdated",
       "bot:survivorStarted", "bot:survivorStopped", "bot:survivorLog",
