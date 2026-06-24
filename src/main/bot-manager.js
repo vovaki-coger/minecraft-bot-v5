@@ -1273,6 +1273,8 @@ class BotManager {
     instance._pvpLoopRunning = true;
     this.emit('bot:pvpToggled', { botId, pvpMode: true });
     this._emitActionLog(botId, 'pvp', '▶ PVP режим запущен — крит+спринт');
+    // Forward all PVP debug logs to renderer Logs tab
+    pvpController.on('pvp:log', (msg) => this._emitActionLog(botId, 'pvp', msg));
 
     // Подключаем прогресс обучения нейросети к renderer
     const brain = instance._pvpController.brain;
