@@ -1,14 +1,13 @@
 /**
- * PvpController v5
- * - Спринт при преследовании (Ctrl + W)
- * - Крит: атака в начале падения (~360мс от прыжка), не после посадки
- * - Прицел на грудь (y+0.9), не на голову — фикс промахов
- * - Онлайн-обучение нейросети после каждого тика
- * - 40-блоков обнаружение + поле зрения (не автоатака)
- * - Тимейты: безопасная проверка entity.username
- * - Зелья сил/скорости/огнестойкости на себя (взрыв вверх)
- * - Преследование убегающих игроков (спринт + pathfinder-fallback)
- * - Правильный HP-conflict fix: _isDoingAction сбрасывается если бот получил урон
+ * PvpController v5.1 — FIXES:
+ * - Line-of-sight проверка перед атакой (не бьём сквозь блоки)
+ * - _isEating флаг: удар не прерывает еду
+ * - Криты: пересчёт прицела по ЖИВОЙ позиции цели после прыжка
+ * - Ритм критов: % 2 (1 крит → 1 обычный, и т.д.)
+ * - _autoBuffPotions добавлен (был краш каждые 8 тиков)
+ * - Зелья на себя: splash → activateItem (бросок), обычные → consume
+ * - Еда при низком HP даже без цели
+ * - Движение: только один режим (pathfinder ИЛИ прямое управление), смотрим куда идём
  */
 
 const log = require("electron-log");
@@ -27,14 +26,32 @@ const FOOD_PRIORITY = [
   "mushroom_stew","rabbit_stew","pumpkin_pie","melon_slice","cookie","dried_kelp",
 ];
 
-// Время крит-цикла (мс)
-const CRIT_JUMP_PRESS    = 90;  // держать прыжок
-const CRIT_WAIT_PEAK     = 260; // ждать пика → начало падения
-const CRIT_ATTACK_WINDOW = 10;  // небольшой буфер
-
 function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
 function sleep(ms)    { return new Promise(r => setTimeout(r, ms)); }
 function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
+
+// Проверка прямой видимости (нет блоков между ботом и целью)
+function hasLineOfSight(bot, target) {
+  try {
+    if (!bot?.entity || !target?.position) return false;
+    const from = bot.entity.position.offset(0, 1.62, 0); // глаза бота
+    const to   = target.position.offset(0, target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5, 0);
+    const dir  = to.minus(from);
+    const dist = dir.norm();
+    if (dist < 0.1) return true;
+    const norm = dir.scaled(1 / dist);
+
+    // Проверяем блоки по лучу
+    let step = 0;
+    while (step < dist - 0.5) {
+      step = Math.min(step + 0.5, dist - 0.1);
+      const pt   = from.offset(norm.x * step, norm.y * step, norm.z * step);
+      const block = bot.blockAt(pt);
+      if (block && block.boundingBox === 'block') return false;
+    }
+    return true;
+  } catch { return true; } // при ошибке — разрешаем атаку
+}
 
 class PvpController {
   constructor(instance, emit) {
@@ -49,21 +66,22 @@ class PvpController {
     this._tickCount     = 0;
     this._hitCount      = 0;
     this._critCount     = 0;
-    this._lastAttackMs  = 0;   // трекер CD атаки
-    this._forceAttack   = 0;     // тиков принудительной атаки
+    this._lastAttackMs  = 0;
+    this._forceAttack   = 0;
     this._isDoingAction = false;
+    this._isEating      = false;  // FIX: отдельный флаг еды — не прерывается от урона
+    this._actionStartedAt = 0;
     this._lastHealthCheck = 0;
     this._lastHP         = 20;
     this._spawnTime      = Date.now();
-    this._detectedPlayers = [];  // обнаруженные в 40 блоках (не цели)
+    this._detectedPlayers = [];
 
-    this._gappleCooldown          = 0;
-    this._enchantedGappleCooldown = 120000;
+    this._gappleCooldown             = 0;
+    this._enchantedGappleCooldown    = 120000;
     this._gappleCooldownEnd          = 0;
     this._enchantedGappleCooldownEnd = 0;
 
-    // Длительность крит-цикла (мс) — тик запускается через это время
-    this._critCycleMs = CRIT_JUMP_PRESS + CRIT_WAIT_PEAK + CRIT_ATTACK_WINDOW + 200;
+    this._critCycleMs = 350 + 200;
   }
 
   start(opts = {}) {
@@ -71,7 +89,6 @@ class PvpController {
     const { bot } = this.instance;
     if (!bot?.entity) { log.warn("[PvpController] no bot entity"); return; }
 
-    // Тимейты: нормализуем в Set
     const rawTeam = opts.teammates || this.instance.config?.teammates || [];
     this._teammates = new Set(Array.isArray(rawTeam) ? rawTeam.map(s => String(s).toLowerCase()) : []);
 
@@ -87,43 +104,45 @@ class PvpController {
     this._critCount = 0;
     this._forceAttack   = 0;
     this._isDoingAction = false;
+    this._isEating      = false;
     this._lastHP = bot.health ?? 20;
     this._gappleCooldownEnd          = 0;
     this._enchantedGappleCooldownEnd = 0;
 
-    // Anti-detect
     try {
       const { Movements } = require("mineflayer-pathfinder");
       const m = new Movements(bot);
-      m.allowSprinting  = true;  // спринт разрешён
+      m.allowSprinting  = true;
       m.allow1by1towers = false;
       m.canDig          = false;
       bot.pathfinder.setMovements(m);
     } catch {}
 
-    // Слушаем урон — сбрасываем _isDoingAction если нас ударили в процессе еды
+    // FIX: урон НЕ прерывает еду (_isEating), только другие действия
     this._onHurt = () => {
       const currentHP = bot.health ?? 20;
-      if (currentHP < this._lastHP - 0.5 && this._isDoingAction) {
-        if (currentHP <= 1) {
-          // Тотем сработал — HP на 1, нужно срочно ЕСТЬ, а не атаковать
-          log.debug("[PvpController] 🛡️ Тотем сработал — продолжаем лечение");
-          this._isDoingAction = false;
-          this._forceAttack = 0; // не атаковать — лечиться
-        } else {
-          log.debug("[PvpController] урон получен во время действия — прерываем");
-          this._isDoingAction = false;
-          this._forceAttack = 3;
+      if (currentHP < this._lastHP - 0.5) {
+        if (!this._isEating && this._isDoingAction) {
+          if (currentHP <= 1) {
+            log.debug("[PvpController] 🛡️ Тотем сработал — продолжаем лечение");
+            this._isDoingAction = false;
+            this._forceAttack = 0;
+          } else {
+            log.debug("[PvpController] урон во время действия — прерываем (не еду)");
+            this._isDoingAction = false;
+            this._forceAttack = 3;
+          }
         }
+        // Если едим — НЕ прерываем, продолжаем есть
       }
       this._lastHP = currentHP;
     };
     try { bot.on("entityHurt", this._onHurt); } catch {}
 
     this.emit("bot:pvpStarted", { botId: this.instance.id });
-    this._addChat("⚔️ PVP v5 [крит+спринт]");
+    this._addChat("⚔️ PVP v5.1 [LOS+крит+спринт]");
     this._scheduleTick(200);
-    log.info(`[PvpController] v5 started gappleCD=${gSec}s enchCD=${egSec}s team=[${[...this._teammates].join(",")}]`);
+    log.info(`[PvpController] v5.1 started team=[${[...this._teammates].join(",")}]`);
   }
 
   stop() {
@@ -138,12 +157,12 @@ class PvpController {
       try { bot.setControlState?.("jump",    false); } catch {}
     }
     this._isDoingAction = false;
+    this._isEating      = false;
     this._target = null;
     this.emit("bot:pvpStopped", { botId: this.instance.id });
     this._addChat("🛑 PVP остановлен");
   }
 
-  // ── Тик с адаптивным интервалом ─────────────────────────────────────
   _scheduleTick(ms) {
     if (!this._running) return;
     if (this._loopTimer) clearTimeout(this._loopTimer);
@@ -160,11 +179,20 @@ class PvpController {
 
     try {
       this._findTarget();
-      this._scanNearby80();  // 80-блоков пассивное обнаружение
+      this._scanNearby80();
 
+      // FIX: нет цели, но HP низкий — всё равно едим
       if (!this._target) {
         try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
-        this._scheduleTick(400);
+        const hp   = bot.health ?? 20;
+        const food = bot.food   ?? 20;
+        if (!this._isDoingAction && !this._isEating) {
+          const eatMode = this._shouldEatNoCombat(hp, food);
+          if (eatMode) {
+            await this._doEatSmart(bot, eatMode);
+          }
+        }
+        this._scheduleTick(600);
         return;
       }
 
@@ -172,15 +200,19 @@ class PvpController {
       const food = bot.food   ?? 20;
       const dist = bot.entity.position.distanceTo(this._target.position);
 
-      // Если _isDoingAction > 2 секунд — что-то зависло, сбрасываем
-      if (this._isDoingAction && Date.now() - (this._actionStartedAt || 0) > 3000) {
+      // Сброс зависших действий (не еды — у еды свой флаг)
+      if (this._isDoingAction && !this._isEating && Date.now() - this._actionStartedAt > 3000) {
         this._isDoingAction = false;
         this._forceAttack = 2;
       }
+      // Еда слишком долго (>5 сек)
+      if (this._isEating && Date.now() - this._actionStartedAt > 5000) {
+        this._isEating = false;
+        this._isDoingAction = false;
+      }
 
-      if (this._isDoingAction) { this._scheduleTick(150); return; }
+      if (this._isDoingAction || this._isEating) { this._scheduleTick(150); return; }
 
-      // ── Приоритет действий ───────────────────────────────────────────
       // 1. ЭКСТРЕННОЕ ЛЕЧЕНИЕ (HP ≤ 4)
       if (hp <= 4) {
         const healed = await this._emergency(bot);
@@ -198,47 +230,46 @@ class PvpController {
       // 3. Принудительная атака после еды/зелья
       if (this._forceAttack > 0) this._forceAttack--;
 
-      // 4. ДВИЖЕНИЕ + АТАКА (основное)
+      // 4. ДВИЖЕНИЕ + АТАКА
       await this._doMoveAndAttack(bot, dist);
 
-      // 5. БАФ-ЗЕЛЬЕ раз в 30 сек
-      if (this._tickCount % 8 === 0)  await this._autoBuffPotions(bot);
+      // 5. БАФ-ЗЕЛЬЯ
+      if (this._tickCount % 8  === 0) await this._autoBuffPotions(bot);
       if (this._tickCount % 15 === 0) await this._tryDebuffPotion(bot);
       if (this._tickCount % 50 === 0) await this._tryBuffPotion(bot);
 
       // 6. ХИЛ-ЗЕЛЬЕ при HP < 10
       if (hp < 10 && this._tickCount % 8 === 0) await this._tryHealPotion(bot);
 
-      // 7. Онлайн-обучение нейросети
+      // 7. Онлайн-обучение
       this._trainBrain(bot, hp);
 
     } catch (err) {
       log.debug("[PvpController] tick error:", err.message);
     }
 
-    // Крит-цикл включает свои ожидания — после атаки тик быстрее
-    const nextDelay = this._target ? 80 : 400; // 80ms base — крит-цикл управляет реальным ритмом
-    this._scheduleTick(nextDelay);
+    this._scheduleTick(this._target ? 80 : 400);
   }
 
-  // ── ДВИЖЕНИЕ + АТАКА (v3.0.1 — полный рефакт) ──────────────────────
   async _doMoveAndAttack(bot, dist) {
-    if (this._isDoingAction) return;
+    if (this._isDoingAction || this._isEating) return;
     const target = this._target;
     if (!target?.position || !bot.entity) return;
 
     const pos  = bot.entity.position;
     const tpos = target.position;
 
-    // ── Прицел вычисляем ПЕРВЫМ (чтобы yaw был доступен для look при движении)
     const dx     = tpos.x - pos.x;
     const dz     = tpos.z - pos.z;
     const dist2d = Math.max(Math.sqrt(dx*dx + dz*dz), 0.01);
-    const yaw    = Math.atan2(-dx, -dz);   // направление к цели
+    const yaw    = Math.atan2(-dx, -dz);
     const aimY   = tpos.y + (target.type === 'player' ? 0.85 : (target.height || 1.8) * 0.5);
     const pitch  = -Math.atan2(aimY - (pos.y + 1.62), dist2d);
 
-    // ── Оружие ───────────────────────────────────────────────────────
+    // Закрываем инвентарь
+    try { if (bot.currentWindow) bot.closeWindow(bot.currentWindow); } catch {}
+
+    // Оружие
     const eq = target.equipment || [];
     const enemyHasShield = [eq[0], eq[1]].some(i => i?.name?.includes('shield'));
     const items  = bot.inventory.items();
@@ -248,100 +279,129 @@ class PvpController {
     const weapon = (enemyHasShield && axe) ? axe : (sword || axe);
     const weaponCD = (weapon && AXE_NAMES.some(n => weapon.name.includes(n))) ? 975 : 600;
 
-    // Тотем в оффхэнд при HP ≤ 5
     if ((bot.health ?? 20) <= 5 && totem) {
       try { await bot.equip(totem, 'off-hand'); } catch {}
     }
 
-    // ── Закрываем инвентарь/сундук ───────────────────────────────────
-    try { if (bot.currentWindow) bot.closeWindow(bot.currentWindow); } catch {}
-
-    // ── ДВИЖЕНИЕ ─────────────────────────────────────────────────────
-    if (dist > 3.0) {
-      // FIX: смотрим к цели (yaw объявлен выше — нет ошибки)
-      try { await bot.look(yaw, 0, false); } catch {}
-      // FIX: останавливаем pathfinder когда близко (< 5 блоков), иначе конфликт
-      if (dist < 5) { try { bot.pathfinder?.stop(); } catch {} }
-      try { bot.setControlState('forward', true);  } catch {}
-      try { bot.setControlState('sprint',  true);  } catch {}
-      if (dist >= 5) {
+    // FIX: ДВИЖЕНИЕ — только один режим управления
+    if (dist > 3.5) {
+      // Далеко: смотрим К цели, pathfinder управляет движением
+      try { await bot.look(yaw, -0.3, false); } catch {} // смотрим немного вниз — как игрок
+      if (dist > 8) {
+        // Используем pathfinder для навигации через препятствия
         try {
           const { goals } = require('mineflayer-pathfinder');
-          bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2), false);
-        } catch {}
+          // Ставим цель только если она далеко ушла (не перезапускать каждый тик)
+          if (!this._lastGoalPos || this._lastGoalPos.distanceTo(tpos) > 3) {
+            this._lastGoalPos = tpos.clone();
+            bot.pathfinder.setGoal(new goals.GoalNear(tpos.x, tpos.y, tpos.z, 2.5), false);
+          }
+        } catch {
+          // Фоллбэк: прямой контроль
+          try { bot.setControlState('forward', true); bot.setControlState('sprint', true); } catch {}
+        }
+      } else {
+        // 3.5-8 блоков: прямой контроль (pathfinder конфликтует на коротких дистанциях)
+        try { bot.pathfinder?.stop(); } catch {}
+        try { bot.setControlState('forward', true); bot.setControlState('sprint', true); } catch {}
       }
       return;
     }
 
+    // В зоне удара (≤3.5 блоков)
+    this._lastGoalPos = null;
     try { bot.pathfinder?.stop(); } catch {}
+    try { bot.setControlState('sprint',  false); } catch {}
 
-    if (dist > 1.8) {
-      try { bot.setControlState('forward', true);  } catch {}
-      try { bot.setControlState('sprint',  false); } catch {}
+    if (dist > 2.5) {
+      try { bot.setControlState('forward', true); } catch {}
     } else {
       try { bot.setControlState('forward', false); } catch {}
-      try { bot.setControlState('sprint',  false); } catch {}
     }
 
-    // Берём оружие (только когда dist <= 3.0, не во время бега)
+    // Берём оружие
     if (weapon && bot.heldItem?.name !== weapon.name) {
       try { await bot.equip(weapon, 'hand'); await sleep(45 + rand(0,20)); } catch {}
     }
 
-    // ── КД АТАКИ ─────────────────────────────────────────────────────
+    // КД атаки
     if (Date.now() - this._lastAttackMs < weaponCD) return;
 
-    // ── ПРИЦЕЛ + LOOK ─────────────────────────────────────────────────
-    try { await bot.look(yaw, pitch, true); } catch {}
-    await sleep(40 + rand(0, 40));
+    // FIX: LINE-OF-SIGHT — не бьём сквозь блоки
+    if (!hasLineOfSight(bot, target)) {
+      log.debug("[PvpController] Нет LoS — цель за блоком");
+      // Пытаемся обойти: двигаемся к цели
+      try { bot.setControlState('forward', true); } catch {}
+      return;
+    }
 
-    // ── ФИНАЛЬНАЯ ДИСТАНЦИЯ (vanilla reach = 3.0 блока) ──────────────
+    // Прицел + look
+    try { await bot.look(yaw, pitch, true); } catch {}
+    await sleep(30 + rand(0, 30));
+
     const finalDist = bot.entity.position.distanceTo(tpos);
     if (finalDist > 3.5) {
       try { bot.setControlState('forward', true); } catch {}
       return;
     }
 
-    // ── КРИТ: каждый 3-й удар, атака ВО ВРЕМЯ ПАДЕНИЯ ───────────────
-    const doCrit = bot.entity.onGround && (this._hitCount % 3 === 0) && finalDist < 3.0;
+    // FIX: КРИТ — каждый 2-й удар (1 крит, 1 обычный)
+    // Убеждаемся что стоим на земле перед крит-прыжком
+    const doCrit = bot.entity.onGround && (this._hitCount % 2 === 0) && finalDist < 3.0;
+
     if (doCrit) {
       try { bot.setControlState('jump', true); } catch {}
-      // Ждём пока реально прыгнем (onGround → false)
+      // Ждём отрыва от земли
       let waited = 0;
-      while (bot.entity.onGround && waited < 250) { await sleep(20); waited += 20; }
+      while (bot.entity.onGround && waited < 300) { await sleep(20); waited += 20; }
       try { bot.setControlState('jump', false); } catch {}
-      // Ждём ~280мс от отрыва — это пик+начало падения
-      await sleep(280 + rand(0, 40));
-      // Пересчитываем прицел с ТЕКУЩЕЙ позиции (бот выше)
-      const cp = bot.entity.position;
-      const ndx = tpos.x - cp.x, ndz = tpos.z - cp.z;
-      const nd2d = Math.max(Math.sqrt(ndx*ndx + ndz*ndz), 0.01);
-      try { await bot.look(Math.atan2(-ndx,-ndz), -Math.atan2(aimY-(cp.y+1.62), nd2d), true); } catch {}
+
+      // Ждём пик (~150мс от отрыва)
+      await sleep(150 + rand(0, 30));
+
+      // FIX: Пересчёт прицела по ТЕКУЩЕЙ позиции цели (не старой!)
+      const freshTarget = this._target;
+      if (freshTarget?.position) {
+        const cp   = bot.entity.position;
+        const ftpos = freshTarget.position;
+        const ndx  = ftpos.x - cp.x;
+        const ndz  = ftpos.z - cp.z;
+        const nd2d = Math.max(Math.sqrt(ndx*ndx + ndz*ndz), 0.01);
+        const freshAimY = ftpos.y + (freshTarget.type === 'player' ? 0.85 : (freshTarget.height || 1.8) * 0.5);
+        const newYaw   = Math.atan2(-ndx, -ndz);
+        const newPitch = -Math.atan2(freshAimY - (cp.y + 1.62), nd2d);
+        try { await bot.look(newYaw, newPitch, true); } catch {}
+      }
       await sleep(20);
-      if (bot.entity.position.distanceTo(tpos) > 3.5) return;
+
+      // Проверяем дистанцию снова после прыжка
+      if (this._target && bot.entity.position.distanceTo(this._target.position) > 3.8) {
+        // Цель убежала пока прыгали — не атакуем
+        return;
+      }
     }
 
-    // ── АТАКА ────────────────────────────────────────────────────────
+    // АТАКА
     try {
       bot.attack(target);
       this._lastAttackMs = Date.now();
       this._attackCount++;
       this._hitCount++;
-      if (doCrit) { this._critCount++; log.debug('[PvpController] 💥 КРИТ'); }
+      if (doCrit) { this._critCount++; log.debug('[PvpController] 💥 КРИТ #' + this._critCount); }
       // W-TAP
       try { bot.setControlState('forward', false); } catch {}
-      await sleep(50 + rand(0, 30));
+      await sleep(45 + rand(0, 25));
       if (this._running && this._target) {
-        const aftD = bot.entity?.position?.distanceTo(tpos) ?? 0;
-        if (aftD > 1.5) { try { bot.setControlState('forward', true); } catch {} }
+        const aftD = bot.entity?.position?.distanceTo(this._target.position) ?? 0;
+        if (aftD > 2) { try { bot.setControlState('forward', true); } catch {} }
       }
     } catch (err) {
       log.debug('[PvpController] attack:', err.message);
     }
-    if (doCrit) { await sleep(200 + rand(0,40)); }
+    if (doCrit) { await sleep(180 + rand(0,40)); }
   }
 
-  // ── HP-ЛОГИКА ЕДЫ ───────────────────────────────────────────────────
+  // ── HP-ЛОГИКА ЕДЫ (во время боя) ─────────────────────────────────────────
   _shouldEat(hp, food) {
     if (hp <= 10) {
       if (food >= 18) return "gapple";
@@ -353,17 +413,26 @@ class PvpController {
     return null;
   }
 
+  // FIX: Еда без цели (вне боя)
+  _shouldEatNoCombat(hp, food) {
+    if (hp <= 14) return "gapple_if_have";
+    if (hp < 20 && food < 16) return "regular";
+    if (food < 12) return "regular";
+    return null;
+  }
+
   async _doEatSmart(bot, mode) {
     this._isDoingAction = true;
+    this._isEating = true;   // FIX: отдельный флаг
     this._actionStartedAt = Date.now();
     try {
       try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
-      await sleep(80 + rand(0, 60));
+      await sleep(60 + rand(0, 50));
 
-      // Отбегаем пока едим
       try { bot.setControlState("back", true); } catch {}
-      await sleep(100);
-      if (mode === "gapple" || mode === "gapple_if_have") {
+      await sleep(80);
+
+      if (mode === "gapple") {
         await this._eatBestGapple(bot);
       } else if (mode === "gapple_if_have") {
         const had = await this._eatBestGapple(bot);
@@ -371,7 +440,7 @@ class PvpController {
       } else if (mode === "regular_then_gapple") {
         const food = this._selectRegularFood(bot);
         if (food) await this._eatItem(bot, food);
-        await sleep(120);
+        await sleep(100);
         await this._eatBestGapple(bot);
       } else {
         const food = this._selectRegularFood(bot);
@@ -379,8 +448,9 @@ class PvpController {
       }
       try { bot.setControlState("back", false); } catch {}
     } finally {
+      this._isEating      = false;  // FIX
       this._isDoingAction = false;
-      this._forceAttack = 5;
+      this._forceAttack   = 5;
     }
   }
 
@@ -425,9 +495,8 @@ class PvpController {
     }
   }
 
-  // ── ЭКСТРЕННОЕ ЛЕЧЕНИЕ ──────────────────────────────────────────────
+  // ── ЭКСТРЕННОЕ ЛЕЧЕНИЕ ────────────────────────────────────────────────────
   async _emergency(bot) {
-    // Сначала хилка
     const healed = await this._tryHealPotion(bot);
     if (healed) return true;
     return await this._eatBestGapple(bot);
@@ -436,60 +505,77 @@ class PvpController {
   async _tryHealPotion(bot) {
     const p = bot.inventory.items().find(i => HEAL_POTION.some(k => i.name.toLowerCase().includes(k)));
     if (!p) return false;
-    await this._doSplashPotion(bot, "heal", p);
+    await this._applyPotionOnSelf(bot, p);
     return true;
   }
 
   async _tryBuffPotion(bot) {
     const p = bot.inventory.items().find(i => BUFF_POTION.some(k => i.name.toLowerCase().includes(k)));
     if (!p) return;
-    await this._doSplashPotion(bot, "buff", p);
+    await this._applyPotionOnSelf(bot, p);
   }
 
-  // ── СПЛЭШ ЗЕЛЬЕ ─────────────────────────────────────────────────────
-  // buff/heal = на себя (вверх), debuff = на врага (вперёд-вниз)
-
-  // ── ДЕБАФ-ЗЕЛЬЯ: бросаем харм/яд на врага ───────────────────────────
-  async _tryDebuffPotion(bot) {
-    if (!this._target || this._isDoingAction) return;
-    const cfg = this.instance.config || {};
-    if (cfg.useSplashPotions === false) return; // отключено в настройках
-
-    const dist = bot.entity.position.distanceTo(this._target.position);
-    if (dist > 6) return; // слишком далеко
-
+  // FIX: _autoBuffPotions — был краш (метод не существовал)
+  async _autoBuffPotions(bot) {
+    if (this._isDoingAction || this._isEating || !this._target) return;
+    const hp = bot.health ?? 20;
+    // Бафаем при хорошем HP (> 12) если есть буф-зелья
+    if (hp < 12) return;
     const items = bot.inventory.items();
-    // Ищем дебаф-зелья: instant_damage (вред), harming, poison, weakness
-    const debuffPotion = items.find(i => {
-      const n = i.name.toLowerCase();
-      return (n.includes('splash') || n.includes('lingering')) &&
-             (n.includes('instant_damage') || n.includes('harming') ||
-              n.includes('poison') || n.includes('weakness') || n.includes('slowness'));
-    });
-    if (!debuffPotion) return;
-    await this._doSplashPotion(bot, 'debuff', debuffPotion);
+    const buff = items.find(i => BUFF_POTION.some(k => i.name.toLowerCase().includes(k)));
+    if (!buff) return;
+    await this._applyPotionOnSelf(bot, buff);
+  }
+
+  // FIX: различаем splash (бросок вверх) vs обычное зелье (drink = consume)
+  async _applyPotionOnSelf(bot, potion) {
+    if (this._isDoingAction || this._isEating) return;
+    this._isDoingAction = true;
+    this._actionStartedAt = Date.now();
+    try {
+      try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
+      await sleep(60 + rand(0, 40));
+      await bot.equip(potion, "hand");
+      await sleep(50 + rand(0, 30));
+
+      const name = potion.name.toLowerCase();
+      const isSplash = name.includes('splash') || name.includes('lingering');
+
+      if (isSplash) {
+        // Бросаем вверх на себя (падает на нас)
+        const curYaw = bot.entity?.yaw ?? 0;
+        try { await bot.look(curYaw, -Math.PI * 0.42, false); } catch {}
+        await sleep(40);
+        bot.activateItem();
+        this._addChat("💊 Зелье (бросок)!", "system");
+      } else {
+        // Обычное зелье — пьём
+        await bot.consume();
+        this._addChat("💊 Зелье (выпито)!", "system");
+      }
+      this._forceAttack = 3;
+    } catch (err) {
+      log.debug("[PvpController] applyPotion:", err.message);
+    } finally {
+      this._isDoingAction = false;
+    }
   }
 
   async _doSplashPotion(bot, type, potion) {
-    if (this._isDoingAction) return;
+    if (this._isDoingAction || this._isEating) return;
     this._isDoingAction = true;
     this._actionStartedAt = Date.now();
     try {
       try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
       await sleep(80 + rand(0, 50));
-
       await bot.equip(potion, "hand");
       await sleep(60 + rand(0, 40));
 
       if (type === "heal" || type === "buff") {
-        // На себя: смотрим прямо вверх (почти 90°), кидаем — падает на нас
-        const curYaw = bot.entity?.yaw ?? 0;
-        try { await bot.look(curYaw, -Math.PI * 0.45, false); } catch {}
-        await sleep(50);
-        bot.activateItem();
-        this._addChat(type === "buff" ? "✨ БУФФ!" : "💊 Хилка!", "system");
+        await this._applyPotionOnSelf(bot, potion);
+        return; // applyPotionOnSelf сам управляет _isDoingAction
       } else {
-        // На врага: целимся прямо в него, немного выше
+        // На врага
         if (this._target?.position && bot.entity) {
           const dx  = this._target.position.x - bot.entity.position.x;
           const dz  = this._target.position.z - bot.entity.position.z;
@@ -499,74 +585,77 @@ class PvpController {
           bot.activateItem();
           this._addChat("☠️ Дебаф!", "system");
         }
+        this._forceAttack = 3;
       }
-      this._forceAttack = 3;
     } catch (err) {
-      log.debug("[PvpController] potion:", err.message);
+      log.debug("[PvpController] splashPotion:", err.message);
     } finally {
       this._isDoingAction = false;
     }
   }
 
-  // ── ПОИСК БЛИЖАЙШЕЙ ЦЕЛИ (16 блоков) ──────────────────────────────
+  async _tryDebuffPotion(bot) {
+    if (!this._target || this._isDoingAction || this._isEating) return;
+    const cfg = this.instance.config || {};
+    if (cfg.useSplashPotions === false) return;
+    const dist = bot.entity.position.distanceTo(this._target.position);
+    if (dist > 6) return;
+    const items = bot.inventory.items();
+    const debuff = items.find(i => {
+      const n = i.name.toLowerCase();
+      return (n.includes('splash') || n.includes('lingering')) &&
+             (n.includes('instant_damage') || n.includes('harming') ||
+              n.includes('poison') || n.includes('weakness') || n.includes('slowness'));
+    });
+    if (!debuff) return;
+    await this._doSplashPotion(bot, 'debuff', debuff);
+  }
+
+  // ── ПОИСК ЦЕЛИ ────────────────────────────────────────────────────────────
   _findTarget() {
     const { bot } = this.instance;
     if (!bot?.entity) { this._target = null; return; }
-
     let closest = null, minDist = 80;
     for (const e of Object.values(bot.entities || {})) {
       if (!e?.position || e === bot.entity) continue;
       if (e.type !== "player" && e.type !== "mob") continue;
-      // Безопасная проверка тимейтов
       const uname = typeof e.username === "string" ? e.username.toLowerCase() : null;
       if (uname && this._teammates.has(uname)) continue;
       if (uname && uname === (bot.username || "").toLowerCase()) continue;
       if (e.isValid === false) continue;
-
       const d = bot.entity.position.distanceTo(e.position);
       if (d < minDist) { minDist = d; closest = e; }
     }
     this._target = closest;
   }
 
-  // ── ПАССИВНОЕ ОБНАРУЖЕНИЕ 40 БЛОКОВ + ПОЛЕ ЗРЕНИЯ ────────────────
   _scanNearby80() {
     const { bot } = this.instance;
-    if (!bot?.entity || this._tickCount % 5 !== 0) return; // каждые 5 тиков
-
+    if (!bot?.entity || this._tickCount % 5 !== 0) return;
     const detected = [];
     const botPos = bot.entity.position;
     const botYaw = bot.entity.yaw;
-
     for (const e of Object.values(bot.entities || {})) {
       if (!e?.position || e === bot.entity || e.type !== "player") continue;
       const uname = typeof e.username === "string" ? e.username.toLowerCase() : null;
       if (uname && this._teammates.has(uname)) continue;
       if (uname && uname === (bot.username || "").toLowerCase()) continue;
-
       const d = botPos.distanceTo(e.position);
       if (d > 80) continue;
-
-      // Проверяем поле зрения (90° от направления взгляда)
       const dx = e.position.x - botPos.x;
       const dz = e.position.z - botPos.z;
       const angleToTarget = Math.atan2(-dx, -dz);
       let angleDiff = Math.abs(angleToTarget - botYaw) % (2 * Math.PI);
       if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
-      const inFOV = angleDiff < Math.PI * 0.5; // 90° поле зрения
-
-      if (inFOV || d < 16) { // в 16 блоках — всегда видим
-        detected.push({ username: e.username, distance: Math.round(d), inFOV });
-      }
+      const inFOV = angleDiff < Math.PI * 0.5;
+      if (inFOV || d < 16) detected.push({ username: e.username, distance: Math.round(d), inFOV });
     }
-
     if (detected.length > 0) {
       this._detectedPlayers = detected;
       this.emit("bot:pvpDetected", { botId: this.instance.id, players: detected });
     }
   }
 
-  // ── ОНЛАЙН-ОБУЧЕНИЕ ─────────────────────────────────────────────────
   _trainBrain(bot, hp) {
     if (!this._target || this._tickCount % 10 !== 0) return;
     try {
