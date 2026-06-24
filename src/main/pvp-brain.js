@@ -814,6 +814,398 @@ function buildSeedData() {
     label([dist,bHp,tHp,hpDiff,hunger,1,food,hasHeal,0,cd,rnd(0,0.4),rnd(0,0.4)], 0,ret,eat,heal,0,0,str);
   }
 
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // МЕГАСЦЕНАРИЙ 1: «АЛМАЗНЫЙ УБИЙЦА» — 120 000 сценариев
+  // Описание: одиночный бой против лучшего противника в алмазной броне
+  // и алмазным мечом. Бот должен использовать ВСЕГО себя — criты, зелья,
+  // правильное дистанцирование, W-tap, золотые яблоки. Детально описывает
+  // каждую фазу боя: фаза контакта, фаза крит-цикла, фаза отхода,
+  // фаза лечения, финишер. Бот учится НЕ паниковать при низком HP,
+  // а действовать чётко по алгоритму.
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const rnd = (a,b) => a + Math.random()*(b-a);
+    const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+
+    // ── Фаза 1: Сближение (dist 0.4-1.0) ───────────────────────────────
+    for (let i = 0; i < 20000; i++) {
+      const dist   = rnd(0.40, 1.0);
+      const bHp    = rnd(0.35, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.60, 1.0);
+      const cd     = rnd(0.0,  0.7);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      const hasFd  = pick([0,1]), hasHl=pick([0,1]);
+      // Далеко — бежим вперёд (strafe), атака только если cd>0.85
+      const str = clamp(0.80 + (1-dist)*0.15, 0.70, 0.98);
+      const atk = (dist<0.55 && cd>0.88 && bHp>0.3) ? clamp(cd*0.85,0.5,0.9) : 0;
+      const ret = bHp<0.15 ? clamp(0.7+(0.15-bHp)*3,0.6,0.95) : 0;
+      const eat = (bHp<0.3 && hasFd && !ret) ? 0.55 : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,hasFd,hasHl,0,cd,0,0.2],atk,ret,eat,0,0,0,str);
+    }
+
+    // ── Фаза 2: Крит-цикл (dist 0.08-0.20) ─────────────────────────────
+    for (let i = 0; i < 30000; i++) {
+      const dist   = rnd(0.08, 0.22);
+      const bHp    = rnd(0.25, 1.0);
+      const tHp    = rnd(0.05, 1.0);
+      const hunger = rnd(0.55, 1.0);
+      const cd     = rnd(0.85, 1.0);   // KD почти готов
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      const finishing = tHp < 0.15;
+      // Атака с критом (W-tap + прыжок) — основное действие
+      const atk = finishing ? 1.0 : clamp(cd*(0.88+(0.20-dist)*0.5),0.70,0.98);
+      const str = clamp(0.15+(1-cd)*0.25, 0.05, 0.35); // немного страфим
+      const eat = 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,0,0.1],atk,0,eat,0,0,0,str);
+      // С бафом
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,1,cd,0,0.1],clamp(atk+0.05,0,1),0,0,0,0,0.4,str);
+    }
+
+    // ── Фаза 3: Отход и лечение (HP < 35%) ─────────────────────────────
+    for (let i = 0; i < 30000; i++) {
+      const dist   = rnd(0.0, 0.60);
+      const bHp    = rnd(0.05, 0.35);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.0,  1.0);
+      const cd     = rnd(0.0,  1.0);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      const hasHl  = pick([0,1]);
+      const hasFd  = pick([0,1]);
+      // Очень мало HP — бежим, лечимся, едим
+      const urgency = clamp((0.35-bHp)/0.35, 0, 1);
+      const ret  = clamp(urgency*0.85 + 0.15, 0.30, 0.95);
+      const heal = hasHl ? clamp(urgency*0.80+0.10, 0.40, 0.95) : 0;
+      const eat  = hasFd && !heal ? clamp(urgency*0.65, 0.30, 0.85) : 0;
+      const atk  = bHp > 0.25 && tHp < 0.15 ? 0.75 : 0; // добиваем если враг почти мёртв
+      label([dist,bHp,tHp,hpDiff,hunger,1,hasFd,hasHl,0,cd,0,0.1],atk,ret,eat,heal,0,0,0);
+    }
+
+    // ── Фаза 4: Зелья и перки (полный пузырёк) ─────────────────────────
+    for (let i = 0; i < 20000; i++) {
+      const dist   = rnd(0.05, 0.50);
+      const bHp    = rnd(0.50, 1.0);
+      const tHp    = rnd(0.20, 1.0);
+      const hunger = rnd(0.70, 1.0);
+      const cd     = rnd(0.70, 1.0);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Есть бафы + хорошее HP → кидаем зелья, атакуем
+      const pot  = dist < 0.35 ? clamp(0.60+(0.35-dist)*0.8,0.50,0.90) : 0.20;
+      const perk = clamp(0.50+(bHp-0.5)*0.5, 0.30, 0.85);
+      const atk  = dist < 0.25 ? clamp(cd*0.85, 0.60, 0.95) : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,1,cd,0,0.15],atk,0,0,0,pot,perk,0.10);
+    }
+
+    // ── Фаза 5: Финиш (tHp < 15%) ──────────────────────────────────────
+    for (let i = 0; i < 20000; i++) {
+      const dist   = rnd(0.0, 0.40);
+      const bHp    = rnd(0.20, 1.0);
+      const tHp    = rnd(0.01, 0.15);  // враг почти мёртв!
+      const hunger = rnd(0.5,  1.0);
+      const cd     = rnd(0.80, 1.0);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Добиваем! Максимальная атака, никакого отступления
+      const atk = 1.0;
+      const str = clamp(0.10+(0.40-dist)*0.4,0.05,0.35);
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,0,0.1],atk,0,0,0,0,0,str);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // МЕГАСЦЕНАРИЙ 2: «КОМАНДНЫЙ БОЙ» — 120 000 сценариев
+  // Описание: бой 2v2, 3v3 и 2v1. Союзники рядом — агрессивнее.
+  // Врагов несколько — осторожнее и используем AoE зелья. Бот учится:
+  // — Прикрывать союзников (атаковать того, кто бьёт союзника)
+  // — Пользоваться преимуществом численности (flanking)
+  // — Выживать при фокусировке (много врагов на одном боте)
+  // — Правильно распределять ресурсы (кому кидать хил-зелье)
+  // — Дебафф-зелья на группу врагов (splash poison, slowness)
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const rnd = (a,b) => a + Math.random()*(b-a);
+    const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+
+    // 2v1 → бот+союзник против одного врага
+    for (let i = 0; i < 35000; i++) {
+      const dist   = rnd(0.05, 0.60);
+      const bHp    = rnd(0.30, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.60, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const ally   = rnd(0.30, 0.80);  // союзник есть
+      const enemy  = rnd(0.05, 0.25);  // один враг
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // При союзнике — атака агрессивнее, не отступаем
+      const atk = dist < 0.35 && cd > 0.60
+        ? clamp(cd*(0.85 + ally*0.15), 0.65, 1.0) : 0;
+      const str = dist > 0.30 ? clamp(0.75+ally*0.15,0.6,0.95) : 0.10;
+      const ret = bHp < 0.15 ? clamp(0.5+(0.15-bHp)*3,0.3,0.8) : 0;
+      const pot = dist < 0.35 ? 0.30 : 0;  // дебаф при близком контакте
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,ally,enemy],atk,ret,0,0,pot,0,str);
+    }
+
+    // 1v2 → бот один против двух (фокус на боте)
+    for (let i = 0; i < 35000; i++) {
+      const dist   = rnd(0.05, 0.80);
+      const bHp    = rnd(0.10, 0.90);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.30, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const ally   = rnd(0.0, 0.10);   // союзников нет
+      const enemy  = rnd(0.30, 0.80);  // много врагов
+      const hasHl  = pick([0,1]);
+      const hasFd  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Несколько врагов + нас фокусируют → отходим, лечимся, дебаф-зелья
+      const pressure = clamp(enemy * (1-bHp), 0, 1);
+      const ret  = clamp(pressure*0.80 + 0.15, 0.20, 0.95);
+      const heal = hasHl && bHp < 0.5 ? clamp(0.60+(0.5-bHp),0.5,0.90) : 0;
+      const eat  = hasFd && bHp < 0.45 && !heal ? 0.60 : 0;
+      const pot  = enemy > 0.5 && dist < 0.40 ? clamp(enemy*0.70,0.30,0.85) : 0;  // AoE
+      const atk  = !ret && !heal && !eat && dist < 0.20 && cd > 0.90 ? 0.70 : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,hasFd,hasHl,0,cd,ally,enemy],atk,ret,eat,heal,pot,0,0);
+    }
+
+    // 2v2 — баланс атаки и осторожности
+    for (let i = 0; i < 30000; i++) {
+      const dist   = rnd(0.05, 0.70);
+      const bHp    = rnd(0.20, 1.0);
+      const tHp    = rnd(0.05, 1.0);
+      const hunger = rnd(0.40, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const ally   = rnd(0.15, 0.60);
+      const enemy  = rnd(0.15, 0.55);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      const advant = ally - enemy; // насколько нас больше
+      const hasBf  = pick([0,1]);
+      // Нейтральная ситуация — аккуратная агрессия
+      const atk = dist < 0.30 && cd > 0.70
+        ? clamp(cd*(0.75+advant*0.2+bHp*0.1),0.45,0.95) : 0;
+      const str = dist > 0.25 ? clamp(0.70+advant*0.15,0.50,0.90) : 0.15;
+      const perk = hasBf && bHp > 0.60 ? 0.50 : 0;
+      const pot  = dist < 0.35 && enemy > 0.30 ? 0.35 : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,hasBf,cd,ally,enemy],atk,0,0,0,pot,perk,str);
+    }
+
+    // Дебафф-зелья по группе (AoE тактика)
+    for (let i = 0; i < 20000; i++) {
+      const dist   = rnd(0.10, 0.50);
+      const bHp    = rnd(0.40, 1.0);
+      const tHp    = rnd(0.30, 1.0);
+      const hunger = rnd(0.60, 1.0);
+      const cd     = rnd(0.50, 1.0);
+      const ally   = rnd(0.20, 0.80);
+      const enemy  = rnd(0.30, 0.80);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Кидаем дебаф-зелье на группу врагов
+      const pot  = clamp(enemy*0.85 + (bHp-0.4)*0.3, 0.40, 0.95);
+      const atk  = dist < 0.25 && cd > 0.85 ? 0.55 : 0;
+      const perk = bHp > 0.70 ? 0.40 : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,1,cd,ally,enemy],atk,0,0,0,pot,perk,0.10);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // МЕГАСЦЕНАРИЙ 3: «МАСТЕР ЗЕЛИЙ» — 110 000 сценариев
+  // Описание: полный гайд по использованию зелий в PVP. Охватывает:
+  // — Когда бросать зелья силы/скорости/огнестойкости (перед боем)
+  // — Когда бросать яд/замедление/слабость (на врага)
+  // — Когда пить зелья лечения vs бросать исцеление союзнику
+  // — Абсорбция (зелье поглощения) как щит перед входом в бой
+  // — Timing: не бросай зелье под CD удара, дождись анимации
+  // — Эконом-режим: не трать бафы на слабых врагов (tHp < 30%)
+  // — Кризисный режим: throwHeal при HP < 20% важнее атаки
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const rnd = (a,b) => a + Math.random()*(b-a);
+    const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+
+    // ── Бросок хил-зелья в кризис ───────────────────────────────────────
+    for (let i = 0; i < 20000; i++) {
+      const dist   = rnd(0.05, 0.60);
+      const bHp    = rnd(0.05, 0.22);  // крит HP
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.20, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const hasHl  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      const urgency = clamp((0.22-bHp)/0.22, 0, 1);
+      const heal = hasHl ? clamp(0.70+urgency*0.25,0.65,0.98) : 0;
+      const ret  = !heal ? clamp(urgency*0.85+0.10,0.30,0.95) : clamp(urgency*0.40,0.10,0.60);
+      const atk  = !heal && !ret && tHp < 0.10 ? 0.80 : 0; // добиваем
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,hasHl,0,cd,0,0.1],atk,ret,0,heal,0,0,0);
+    }
+
+    // ── Бафы перед боем (предбоевая подготовка) ─────────────────────────
+    for (let i = 0; i < 20000; i++) {
+      const dist   = rnd(0.25, 1.0);   // ещё далеко
+      const bHp    = rnd(0.60, 1.0);
+      const tHp    = rnd(0.20, 1.0);
+      const hunger = rnd(0.70, 1.0);
+      const cd     = rnd(0.0, 0.80);
+      const hasBf  = 1;
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Пока CD восстанавливается — применяем баф
+      const perk = dist > 0.30 && cd < 0.75 ? clamp(0.70+(0.75-cd)*0.3,0.50,0.95) : 0;
+      const str  = dist > 0.35 ? clamp(0.75+(1-dist)*0.2,0.65,0.90) : 0;
+      const atk  = dist < 0.30 && cd > 0.85 ? 0.70 : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,hasBf,cd,0,0.1],atk,0,0,0,0,perk,str);
+    }
+
+    // ── Дебаф-зелья на врага ────────────────────────────────────────────
+    for (let i = 0; i < 20000; i++) {
+      const dist   = rnd(0.08, 0.45);
+      const bHp    = rnd(0.30, 1.0);
+      const tHp    = rnd(0.25, 1.0);
+      const hunger = rnd(0.50, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Кидаем яд/замедление когда:
+      // 1. Мы в хорошей форме (bHp > 0.5)
+      // 2. Враг живой (tHp > 0.3)
+      // 3. Достаточно близко (dist < 0.35)
+      const shouldDebuff = bHp > 0.45 && tHp > 0.25 && dist < 0.40;
+      const pot  = shouldDebuff ? clamp(0.60+(bHp-0.45)*0.5+(0.40-dist)*0.5,0.40,0.90) : 0;
+      const atk  = dist < 0.25 && cd > 0.85 && !pot ? 0.80 : (pot ? 0.30 : 0);
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,0,0.15],atk,0,0,0,pot,0,0.10);
+    }
+
+    // ── Эконом-режим (не тратить бафы) ─────────────────────────────────
+    for (let i = 0; i < 15000; i++) {
+      const dist   = rnd(0.05, 0.50);
+      const bHp    = rnd(0.40, 1.0);
+      const tHp    = rnd(0.01, 0.25);  // враг почти мёртв
+      const hunger = rnd(0.60, 1.0);
+      const cd     = rnd(0.70, 1.0);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Враг слабый — просто добиваем, не тратим ресурсы
+      const atk = 1.0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,1,cd,0,0.05],atk,0,0,0,0,0,0.05);
+    }
+
+    // ── Timing зелий (не бросать под CD удара) ──────────────────────────
+    for (let i = 0; i < 20000; i++) {
+      const dist   = rnd(0.05, 0.30);
+      const bHp    = rnd(0.35, 1.0);
+      const tHp    = rnd(0.20, 0.90);
+      const hunger = rnd(0.50, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const hasBf  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // CD готов → атакуем. CD не готов → можно применить зелье
+      const readyToAtk = cd > 0.88 && dist < 0.22;
+      const atk  = readyToAtk ? clamp(cd*0.90,0.70,0.98) : 0;
+      const perk = !readyToAtk && hasBf && bHp > 0.55 ? clamp(0.50+(1-cd)*0.30,0.35,0.85) : 0;
+      const pot  = !readyToAtk && !perk && dist < 0.30 ? 0.35 : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,hasBf,cd,0,0.1],atk,0,0,0,pot,perk,0.10);
+    }
+
+    // ── Абсорбция перед боем (вход в бой с щитом) ───────────────────────
+    for (let i = 0; i < 15000; i++) {
+      const dist   = rnd(0.30, 0.80);
+      const bHp    = rnd(0.70, 1.0);
+      const tHp    = rnd(0.30, 1.0);
+      const hunger = rnd(0.70, 1.0);
+      const cd     = rnd(0.0, 0.60);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Пока далеко и CD не готов — накидываем абсорбцию
+      const perk = dist > 0.35 && cd < 0.55 ? clamp(0.65+(0.55-cd)*0.4,0.50,0.90) : 0;
+      const str  = dist > 0.30 ? clamp(0.70+(1-dist)*0.20,0.55,0.90) : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,1,cd,0,0.1],0,0,0,0,0,perk,str);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // +350 000 УНИВЕРСАЛЬНЫХ PVP СЦЕНАРИЕВ (полное покрытие)
+  // ═══════════════════════════════════════════════════════════════════════════
+  {
+    const rnd = (a,b) => a + Math.random()*(b-a);
+    const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+
+    // Блок A: полное случайное покрытие пространства состояний — 100 000
+    for (let i = 0; i < 100000; i++) {
+      const dist=rnd(0,1), bHp=rnd(0,1), tHp=rnd(0,1), hunger=rnd(0,1);
+      const sword=pick([0,1]), food=pick([0,1]), hasHeal=pick([0,1]);
+      const hasBuff=pick([0,1]), cd=rnd(0,1), ally=rnd(0,0.8), enemy=rnd(0,0.8);
+      const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
+      let atk=0,ret=0,eat=0,heal=0,pot=0,perk=0,str=0;
+      if (bHp<0.08)                         { ret=0.9; heal=hasHeal?0.92:0; eat=food&&!heal?0.70:0; }
+      else if (bHp<0.22&&hasHeal)           { heal=clamp(0.72+(0.22-bHp)*2.5,0.6,0.92); ret=0.35; }
+      else if (bHp<0.40&&food&&hunger<0.45) { eat=clamp(0.60+(0.40-bHp)*1.5,0.45,0.85); str=0.15; }
+      else if (dist<0.28&&cd>0.78&&sword)   { atk=clamp(cd*0.88+(1-dist)*0.10,0.58,0.98); str=0.12; }
+      else if (dist>0.38)                   { str=clamp(0.72+dist*0.18,0.68,0.98); atk=0; }
+      else                                  { str=clamp((1-cd)*0.65+0.22,0.28,0.82); atk=cd>0.65?cd*0.52:0; }
+      if (hasBuff&&bHp>0.62&&!heal)         { perk=0.52; }
+      if (ally>0.28)                        { atk=clamp(atk*1.22,0,1); ret*=0.58; }
+      if (enemy>0.48&&bHp<0.50)             { ret=clamp(ret+enemy*0.22,0,0.95); }
+      label([dist,bHp,tHp,hpDiff,hunger,sword,food,hasHeal,hasBuff,cd,ally,enemy],atk,ret,eat,heal,pot,perk,str);
+    }
+
+    // Блок B: ближний бой (dist < 0.30) — 60 000
+    for (let i = 0; i < 60000; i++) {
+      const dist   = rnd(0.02, 0.28);
+      const bHp    = rnd(0.15, 1.0);
+      const tHp    = rnd(0.05, 1.0);
+      const hunger = rnd(0.40, 1.0);
+      const cd     = rnd(0.55, 1.0);
+      const hasBf  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      const finish = tHp < 0.12;
+      const atk = finish ? 1.0 : clamp(cd*(0.85+(0.28-dist)*0.5+(bHp-0.15)*0.3),0.55,0.98);
+      const str = finish ? 0 : clamp(0.10+(1-cd)*0.20,0.05,0.35);
+      const perk = hasBf&&bHp>0.60&&!finish ? 0.42 : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,hasBf,cd,0,0.1],atk,0,0,0,0,perk,str);
+    }
+
+    // Блок C: средняя дистанция W-tap стайл (0.15-0.40) — 60 000
+    for (let i = 0; i < 60000; i++) {
+      const dist   = rnd(0.15, 0.40);
+      const bHp    = rnd(0.25, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.50, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      const readyAtk = cd > 0.82 && bHp > 0.25;
+      const atk = readyAtk ? clamp(cd*0.88,0.55,0.95) : 0;
+      const str = !readyAtk ? clamp(0.60+(1-cd)*0.25+(dist-0.15)*0.5,0.45,0.92) : 0.15;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,0,0.12],atk,0,0,0,0,0,str);
+    }
+
+    // Блок D: кризисные ситуации (bHp < 0.20) — 50 000
+    for (let i = 0; i < 50000; i++) {
+      const dist   = rnd(0.0, 0.80);
+      const bHp    = rnd(0.03, 0.20);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.0, 1.0);
+      const cd     = rnd(0.0, 1.0);
+      const hasHl  = pick([0,1]);
+      const hasFd  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      const urg    = clamp((0.20-bHp)/0.20, 0, 1);
+      const heal   = hasHl ? clamp(urg*0.88+0.10,0.45,0.95) : 0;
+      const eat    = hasFd&&!heal ? clamp(urg*0.70+0.10,0.35,0.85) : 0;
+      const ret    = (!heal&&!eat) ? clamp(urg*0.82+0.12,0.30,0.95) : clamp(urg*0.35,0.05,0.55);
+      const atk    = !ret&&!heal&&!eat&&tHp<0.10 ? 0.85 : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,hasFd,hasHl,0,cd,0,0.1],atk,ret,eat,heal,0,0,0);
+    }
+
+    // Блок E: дальняя дистанция (0.40-1.0) — 40 000
+    for (let i = 0; i < 40000; i++) {
+      const dist   = rnd(0.40, 1.0);
+      const bHp    = rnd(0.20, 1.0);
+      const tHp    = rnd(0.10, 1.0);
+      const hunger = rnd(0.40, 1.0);
+      const cd     = rnd(0.0, 0.80);
+      const hasBf  = pick([0,1]);
+      const hpDiff = clamp((bHp-tHp)/2+0.5,0,1);
+      // Бежим к цели, применяем бафы пока CD восстанавливается
+      const str  = clamp(0.75+(1-dist)*0.20,0.60,0.98);
+      const perk = hasBf&&bHp>0.55&&cd<0.60 ? clamp(0.55+(0.60-cd)*0.40,0.40,0.85) : 0;
+      label([dist,bHp,tHp,hpDiff,hunger,1,0,0,hasBf,cd,0,0.1],0,0,0,0,0,perk,str);
+    }
+  }
+
   log.info(`[PvpBrain] Сгенерировано ${data.length} обучающих сценариев`);
   return data;
 }
@@ -861,7 +1253,7 @@ class PvpBrain {
     try {
       // Берём 80 000 случайных сценариев из всего пула (быстрее и достаточно)
       const all  = buildSeedData();
-      const n    = Math.min(80000, all.length);
+      const n    = Math.min(200000, all.length);  // увеличен лимит для 1M+ пула
       // Перемешиваем и берём n сэмплов
       for (let i = all.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
