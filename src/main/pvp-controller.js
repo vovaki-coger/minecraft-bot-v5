@@ -192,7 +192,8 @@ class PvpController {
         const hp   = bot.health ?? 20;
         const food = bot.food   ?? 20;
         // Skip eating while sticky target is still fresh (entity temporarily gone)
-        const stickyFresh = this._stickyTargetTs && (Date.now() - this._stickyTargetTs < 5000);
+        // FIX: 6000мс совпадает с увеличенным sticky window в _findTarget
+        const stickyFresh = this._stickyTargetTs && (Date.now() - this._stickyTargetTs < 6000);
         if (!stickyFresh && !this._isDoingAction && !this._isEating) {
           const eatMode = this._shouldEatNoCombat(hp, food);
           if (eatMode) {
@@ -355,9 +356,19 @@ class PvpController {
     }
 
     this._log(`⚔️ ЗОНА УДАРА dist=${dist.toFixed(2)} оружие=${weapon?.name||'нет'} onGround=${bot.entity.onGround}`);
-    // КД атаки
+    // КД атаки — страфим пока ждём
     const _cdLeft = weaponCD - (Date.now() - this._lastAttackMs);
-    if (_cdLeft > 0) { this._log(`⏳ КД оружия ${_cdLeft}мс`); return; }
+    if (_cdLeft > 0) {
+      // FIX: страфинг во время кулдауна — бот не стоит столбом
+      const _stDir = Math.floor(this._tickCount / 3) % 2 === 0;
+      try { bot.setControlState('left',  _stDir);  } catch {}
+      try { bot.setControlState('right', !_stDir); } catch {}
+      this._log(`⏳ КД оружия ${_cdLeft}мс — стрейф ${_stDir ? 'влево' : 'вправо'}`);
+      return;
+    }
+    // CD готов — сбрасываем страфинг перед ударом
+    try { bot.setControlState('left',  false); } catch {}
+    try { bot.setControlState('right', false); } catch {}
 
     // FIX: LoS — при dist < 2.5 всегда бьём (вплотную), иначе проверяем
     const _los = dist < 2.5 || hasLineOfSight(bot, target);
@@ -430,9 +441,14 @@ class PvpController {
       } else {
         this._log(`🗡 Удар #${this._attackCount} обычный`);
       }
-      // W-TAP
+      // W-TAP + боковой шаг (сайдстеп) при каждом ударе — бот не стоит столбом
       try { bot.setControlState('forward', false); } catch {}
-      await sleep(45 + rand(0, 25));
+      const _tapStDir = this._hitCount % 2 === 0;
+      try { bot.setControlState('left',  _tapStDir);  } catch {}
+      try { bot.setControlState('right', !_tapStDir); } catch {}
+      await sleep(50 + rand(0, 30));
+      try { bot.setControlState('left',  false); } catch {}
+      try { bot.setControlState('right', false); } catch {}
       if (this._running && this._target) {
         const aftD = bot.entity?.position?.distanceTo(this._target.position) ?? 0;
         if (aftD > 2) { try { bot.setControlState('forward', true); } catch {} }
@@ -764,7 +780,12 @@ class PvpController {
 
     for (const e of Object.values(bot.entities || {})) {
       if (!e?.position || e === bot.entity) continue;
-      if (e.isValid === false) continue;
+      // FIX: mineflayer ставит isValid=false на ~50-80 мс во время анимации урона.
+      // Не фильтруем нашу известную цель — иначе теряем её после каждого удара.
+      if (e.isValid === false) {
+        const uname2 = typeof e.username === 'string' ? e.username.toLowerCase() : null;
+        if (!uname2 || uname2 !== this._lastTargetName) continue;
+      }
 
       // Accept by type OR by username (some servers temporarily set wrong type after damage)
       const hasUsername = typeof e.username === 'string' && e.username.length > 0;
@@ -809,15 +830,30 @@ class PvpController {
     // The numeric entity ID on the stale object is still valid — bot.attack() will land.
     if (!closest && this._stickyTarget && this._stickyTarget !== bot.entity) {
       const stickyAge = Date.now() - (this._stickyTargetTs || 0);
-      if (stickyAge < 3000) {
+      // FIX: расширяем окно до 6000мс (мало было 3000 — бот успевал выйти в режим «нет цели»)
+      if (stickyAge < 6000) {
         try {
-          const stickyPos = this._stickyTarget.position;
+          // FIX: если position у entity пропала (полностью удалена), берём из bot.players
+          let stickyPos = this._stickyTarget.position;
+          if (!stickyPos && this._lastTargetName) {
+            try {
+              const players = bot.players || {};
+              const pe = players[this._lastTargetName] ||
+                         Object.values(players).find(p =>
+                           typeof p.username === 'string' &&
+                           p.username.toLowerCase() === this._lastTargetName);
+              if (pe?.entity?.position) {
+                stickyPos = pe.entity.position;
+                this._stickyTarget = pe.entity; // обновляем ссылку
+              }
+            } catch {}
+          }
           if (stickyPos) {
             let d;
             try { d = myPos.distanceTo(stickyPos); } catch {}
-            if (!isNaN(d) && d < 24) {
+            if (!isNaN(d) && d < 30) {
               closest = this._stickyTarget;
-              this._log(`🕯 Sticky цель (stale ref ${Math.round(stickyAge)}мс): ${this._stickyTarget.username || '?'}`);
+              this._log(`🕯 Sticky цель (${Math.round(stickyAge)}мс): ${this._stickyTarget.username || '?'}`);
             }
           }
         } catch {}
