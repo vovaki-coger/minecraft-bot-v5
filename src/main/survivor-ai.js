@@ -741,11 +741,6 @@ ${STAGE_GOALS[SURVIVOR_STAGES[this.currentStage]] || "Продолжай игр�
   // ──────────────────────────────────────────────────────────────────────
 
   _log(msg) {
-    this.instance.chatHistory.push({
-      type: "survivor",
-      text: `[ВЫЖИВАЛЬЩИК] ${msg}`,
-      timestamp: Date.now(),
-    });
     this.emit("bot:survivorLog", { botId: this.instance.id, message: msg });
   }
 

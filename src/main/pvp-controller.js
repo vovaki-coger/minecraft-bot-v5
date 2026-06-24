@@ -147,7 +147,7 @@ class PvpController {
 
   _log(msg) {
     try { log.debug('[PvpController] ' + msg); } catch {}
-    try { this.emit('pvp:log', msg); } catch {}
+    try { this.emit('bot:actionLog', { botId: this.instance.id, logType: 'pvp', msg }); } catch {}
   }
 
   stop() {
@@ -766,8 +766,8 @@ class PvpController {
     this._lastHP = hp;
   }
 
-  _addChat(msg, type = "system") {
-    this.emit("bot:chat", { botId: this.instance.id, username: "pvp-ai", message: msg, type });
+  _addChat(msg) {
+    this.emit('bot:actionLog', { botId: this.instance.id, logType: 'pvp', msg: String(msg) });
   }
 
   isRunning()   { return this._running; }

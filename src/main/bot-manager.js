@@ -304,7 +304,7 @@ class BotManager {
         const newHealth = bot.health || 20;
 
         // Авто-еда при низком здоровье (< 14/20) — анти-чит: стоп перед едой
-        if (newHealth < 14 && bot.food < 18) {
+        if (newHealth < 14 && bot.food < 18 && !instance._pvpController?.isRunning()) {
           const foodItem = bot.inventory.items()
             .filter(i => i.foodPoints && i.foodPoints > 0)
             .sort((a, b) => (b.foodPoints || 0) - (a.foodPoints || 0))[0];
@@ -1270,11 +1270,8 @@ class BotManager {
 
     instance._pvpController = new PvpController(instance, this.emit);
     instance._pvpController.start(opts);
-    instance._pvpLoopRunning = true;
     this.emit('bot:pvpToggled', { botId, pvpMode: true });
     this._emitActionLog(botId, 'pvp', '▶ PVP режим запущен — крит+спринт');
-    // Forward all PVP debug logs to renderer Logs tab
-    pvpController.on('pvp:log', (msg) => this._emitActionLog(botId, 'pvp', msg));
 
     // Подключаем прогресс обучения нейросети к renderer
     const brain = instance._pvpController.brain;
