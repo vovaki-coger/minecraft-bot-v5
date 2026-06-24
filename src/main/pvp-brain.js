@@ -1634,6 +1634,11 @@ function buildSeedData() {
   return data;
 }
 
+// ─── Глобальный флаг принудительного переобучения ─────────────────────────
+// Устанавливается из IPC-обработчика (index.js) при нажатии "Обновить память"
+let _forceRetrain = false;
+function setForceRetrain() { _forceRetrain = true; log.info("[PvpBrain] 🔄 forceRetrain=true"); }
+
 // ─── Класс PvpBrain ───────────────────────────────────────────────────────
 class PvpBrain {
   constructor() {
@@ -1654,55 +1659,86 @@ class PvpBrain {
       momentum:     0.1,
     });
 
-    // Загружаем веса — мгновенно, UI не зависает
-    try {
-      if (fs.existsSync(WEIGHTS_PATH)) {
-        const w = JSON.parse(fs.readFileSync(WEIGHTS_PATH, "utf8"));
-        this.net.fromJSON(w);
-        log.info("[PvpBrain] ✅ Веса загружены мгновенно");
-        this.ready = true;
-        return;
+    // Загружаем веса — мгновенно, если нет флага forceRetrain
+    if (!_forceRetrain) {
+      try {
+        if (fs.existsSync(WEIGHTS_PATH)) {
+          const w = JSON.parse(fs.readFileSync(WEIGHTS_PATH, "utf8"));
+          this.net.fromJSON(w);
+          log.info("[PvpBrain] ✅ Веса загружены мгновенно");
+          this.ready = true;
+          return;
+        }
+      } catch (e) {
+        log.warn("[PvpBrain] Веса не загружены:", e.message);
       }
-    } catch (e) {
-      log.warn("[PvpBrain] Веса не загружены:", e.message);
+    } else {
+      _forceRetrain = false; // сбрасываем флаг — будем обучать
+      log.info("[PvpBrain] forceRetrain — пропускаем кэш, обучаем заново");
+      // Удаляем старый файл весов чтобы не загрузился при следующем запуске
+      try { if (fs.existsSync(WEIGHTS_PATH)) fs.unlinkSync(WEIGHTS_PATH); } catch {}
     }
 
-    // Первый запуск — обучаем АСИНХРОННО (UI не зависает!)
+    // Первый запуск или после reset — обучаем АСИНХРОННО (UI не зависает!)
     this.ready = false;
-    log.info("[PvpBrain] Первый запуск — асинхронное обучение...");
+    log.info("[PvpBrain] Запускаем асинхронное обучение...");
     setImmediate(() => this._trainAsync());
   }
 
   async _trainAsync() {
+    const prog = (pct, msg) => {
+      log.info(`[PvpBrain] ${pct}% — ${msg}`);
+      try { if (typeof this._onProgress === 'function') this._onProgress(pct, msg); } catch {}
+    };
+    const done = () => {
+      try { if (typeof this._onReady === 'function') this._onReady(); } catch {}
+    };
+    // Yield Event Loop один раз — чтобы IPC-сообщение pct=3 успело уйти в renderer
+    // ДО того как buildSeedData() заблокирует Event Loop на ~10-20 сек
+    const yieldLoop = () => new Promise(r => setImmediate(r));
+
     try {
-      // Берём 80 000 случайных сценариев из всего пула (быстрее и достаточно)
-      const all  = buildSeedData();
-      const n    = Math.min(200000, all.length);  // увеличен лимит для 1M+ пула
-      // Перемешиваем и берём n сэмплов
+      prog(3, '📚 Генерируем 2 626 000+ сценариев...');
+      await yieldLoop(); // ← даём IPC доставить сообщение до блокировки
+      const all = buildSeedData();
+      prog(18, `✂️ Выбираем 200 000 из ${all.length.toLocaleString()}...`);
+
+      const n = Math.min(200000, all.length);
       for (let i = all.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [all[i], all[j]] = [all[j], all[i]];
       }
       const data = all.slice(0, n);
+      prog(22, `🧠 Начинаем обучение нейросети (${n.toLocaleString()} сцен.)...`);
       log.info(`[PvpBrain] Обучаем на ${n} сценариях (async)...`);
 
-      // trainAsync — НЕ блокирует UI
+      let iterDone = 0;
+      const TOTAL_ITER = 600;
       await this.net.trainAsync(data, {
-        iterations:  600,
+        iterations:  TOTAL_ITER,
         errorThresh: 0.005,
-        logPeriod:   100,
-        log: (s) => log.info("[PvpBrain] train:", s),
+        logPeriod:   60,
+        log: (s) => {
+          iterDone += 60;
+          const pct = Math.round(22 + (iterDone / TOTAL_ITER) * 70);
+          prog(Math.min(pct, 92), `⚡ Итерация ${iterDone}/${TOTAL_ITER} — ${s}`);
+        },
       });
 
-      // Сохраняем веса
+      prog(95, '💾 Сохраняем веса на диск...');
       try {
         fs.writeFileSync(WEIGHTS_PATH, JSON.stringify(this.net.toJSON()), "utf8");
         log.info("[PvpBrain] ✅ Веса сохранены. Следующий запуск будет мгновенным.");
       } catch (e) { log.warn("[PvpBrain] Не сохранить веса:", e.message); }
+
+      prog(100, '✅ Обучение завершено!');
       this.ready = true;
+      done();
     } catch (e) {
       log.error("[PvpBrain] Ошибка обучения:", e.message);
-      this.ready = true; // fallback — работаем на эвристике
+      prog(100, '⚠️ Ошибка — режим эвристики');
+      this.ready = true;
+      done();
     }
   }
 
@@ -1757,4 +1793,4 @@ class PvpBrain {
   }
 }
 
-module.exports = { PvpBrain };
+module.exports = { PvpBrain, setForceRetrain };
