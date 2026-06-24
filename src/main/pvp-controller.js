@@ -206,7 +206,12 @@ class PvpController {
         this._forceAttack = 2;
       }
       // Еда слишком долго (>5 сек)
-      if (this._isEating && Date.now() - this._actionStartedAt > 5000) {
+      if (this._isEating && Date.now() - this._actionStartedAt > 3500) {
+        this._isEating = false;
+        this._isDoingAction = false;
+      }
+      // FIX: цель появилась пока ели → прерываем еду если HP не критический
+      if (this._isEating && this._target && (bot.health ?? 20) > 6) {
         this._isEating = false;
         this._isDoingAction = false;
       }
@@ -403,13 +408,10 @@ class PvpController {
 
   // ── HP-ЛОГИКА ЕДЫ (во время боя) ─────────────────────────────────────────
   _shouldEat(hp, food) {
-    if (hp <= 10) {
-      if (food >= 18) return "gapple";
-      return "regular_then_gapple";
-    }
-    if (hp <= 16 && food < 18) return "gapple_if_have";
-    if (hp <= 16 && food < 16) return "regular";
-    if (food < 14) return "regular";
+    // ТОЛЬКО критические пороги — не прерываем бой лишний раз
+    if (hp <= 6)  return "gapple";                // критически низко — гапл
+    if (hp <= 10) return "gapple_if_have";        // низко — гапл если есть
+    if (food < 6) return "regular";               // рефген стоит — просто поесть
     return null;
   }
 
@@ -427,10 +429,11 @@ class PvpController {
     this._actionStartedAt = Date.now();
     try {
       try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
-      await sleep(60 + rand(0, 50));
-
-      try { bot.setControlState("back", true); } catch {}
-      await sleep(80);
+      if (!this._target) {
+        // Вне боя — можем отойти назад
+        try { bot.setControlState("back", true); } catch {}
+      }
+      await sleep(60 + rand(0, 40));
 
       if (mode === "gapple") {
         await this._eatBestGapple(bot);
@@ -448,9 +451,9 @@ class PvpController {
       }
       try { bot.setControlState("back", false); } catch {}
     } finally {
-      this._isEating      = false;  // FIX
+      this._isEating      = false;
       this._isDoingAction = false;
-      this._forceAttack   = 5;
+      this._forceAttack   = 3;   // FIX: 3 тика (не 5) — быстрее возвращаемся к бою
     }
   }
 
