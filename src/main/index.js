@@ -119,9 +119,13 @@ function setupIpcHandlers() {
   ipcMain.handle("bot:startPvp", (_e, botId, opts) => botManager.startPvpTask(botId, opts));
   ipcMain.handle("bot:stopPvp", (_e, botId) => botManager.stopPvpMode(botId));
   ipcMain.handle("bot:togglePvpMode", (_e, botId) => botManager.togglePvpMode(botId));
-  // Сброс весов нейросети — удаляем pvp-weights.json → при следующем старте PVP переобучится
+  // Сброс весов нейросети — при следующем старте PVP переобучится
   ipcMain.handle("bot:resetPvpBrain", async () => {
     const fs = require("fs");
+    const { setForceRetrain } = require("./pvp-brain");
+    // 1. Ставим флаг в памяти — гарантирует переобучение независимо от файловой системы
+    setForceRetrain();
+    // 2. Удаляем файл весов чтобы он не загрузился при следующем запуске приложения
     const weightsPath = path.join(__dirname, "../../pvp-weights.json");
     try {
       if (fs.existsSync(weightsPath)) {
@@ -129,7 +133,9 @@ function setupIpcHandlers() {
         log.info("[PvpBrain] Веса сброшены: " + weightsPath);
         return { ok: true, path: weightsPath };
       }
-      return { ok: false, reason: "Файл не найден — уже сброшен или ещё не создан" };
+      // Файла нет, но флаг уже стоит — этого достаточно
+      log.info("[PvpBrain] forceRetrain установлен (файла не было)");
+      return { ok: true, reason: "Файл уже отсутствовал, флаг установлен" };
     } catch (err) {
       log.error("[PvpBrain] Ошибка сброса весов:", err.message);
       return { ok: false, reason: err.message };
