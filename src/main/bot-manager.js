@@ -674,6 +674,24 @@ class BotManager {
   async _handlePlayerMessage(instance, username, message) {
     if (!instance.bot?.entity) return;
 
+    // FIX: бот слушается ТОЛЬКО тимейтов (если тимейты настроены)
+    const teammates = instance.config?.teammates || [];
+    if (teammates.length > 0) {
+      const lowerUser = (username || "").toLowerCase();
+      const isTeammate = teammates.some(t => String(t).toLowerCase() === lowerUser);
+      if (!isTeammate) {
+        log.debug("[BotManager] Игнорируем команду от не-тимейта:", username);
+        // Только AI-ответ (не выполняем команды), если AI включён
+        if (instance.aiBrain && instance.aiEnabled) {
+          const now2 = Date.now();
+          if (now2 - instance._lastAIResponse < 3000) return;
+          instance._lastAIResponse = now2;
+          await instance.aiBrain.respondToPlayer(username, message).catch(() => {});
+        }
+        return;
+      }
+    }
+
     const scriptCmd = parseCommand(message, instance.config.nick);
     if (scriptCmd) {
       log.info("[Script] Task:", scriptCmd.task);
