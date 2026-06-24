@@ -800,51 +800,46 @@ class PvpController {
     const myPos = bot.entity.position;
     const botName = (bot.username || '').toLowerCase();
 
-    for (const e of Object.values(bot.entities || {})) {
-      if (!e?.position || e === bot.entity) continue;
-      // FIX: mineflayer ставит isValid=false на ~50-80 мс во время анимации урона.
-      // Не фильтруем нашу известную цель — иначе теряем её после каждого удара.
-      if (e.isValid === false) {
-        const uname2 = typeof e.username === 'string' ? e.username.toLowerCase() : null;
-        if (!uname2 || uname2 !== this._lastTargetName) continue;
-      }
-
-      // Accept by type OR by username (some servers temporarily set wrong type after damage)
-      const hasUsername = typeof e.username === 'string' && e.username.length > 0;
-      const isPlayer = e.type === 'player' || hasUsername;
-      const isMob    = e.type === 'mob' || e.type === 'hostile';
-      if (!isPlayer && !isMob) continue;
-
-      const uname = hasUsername ? e.username.toLowerCase() : null;
-      if (uname && this._teammates.has(uname)) continue;
-      if (uname && uname === botName) continue;
-
+    // ── ПЕРВЫЙ ПРИОРИТЕТ: bot.players — самый надёжный источник для игроков ──
+    // bot.entities иногда теряет игрока (isValid=false, entity временно удалена),
+    // а bot.players всегда актуален пока игрок на сервере.
+    for (const [pKey, pInfo] of Object.entries(bot.players || {})) {
+      if (!pInfo?.entity?.position) continue;
+      const uname = (typeof pInfo.username === 'string' ? pInfo.username : pKey).toLowerCase();
+      if (uname === botName || this._teammates.has(uname)) continue;
+      const e = pInfo.entity;
+      if (e === bot.entity) continue;
       let d;
       try { d = myPos.distanceTo(e.position); } catch { continue; }
       if (isNaN(d) || d >= minDist) continue;
       minDist = d; closest = e;
     }
 
-    // Fallback: entity may have been temporarily removed from bot.entities
-    // bot.players keeps separate references — check there too
-    if (!closest && this._lastTargetName) {
-      try {
-        // bot.players is a map: username -> { entity, ping, gamemode, ... }
-        const players = bot.players || {};
-        // Try exact key first, then case-insensitive scan
-        let pe = players[this._lastTargetName]
-               || Object.values(players).find(p =>
-                    typeof p.username === 'string' &&
-                    p.username.toLowerCase() === this._lastTargetName);
-        if (pe?.entity?.position) {
-          let d;
-          try { d = myPos.distanceTo(pe.entity.position); } catch {}
-          if (!isNaN(d) && d < 80 && pe.entity !== bot.entity) {
-            closest = pe.entity;
-            this._log('🔄 Цель переподключена через bot.players: ' + this._lastTargetName);
-          }
-        }
-      } catch {}
+    // ── ВТОРОЙ ПРИОРИТЕТ: bot.entities — мобы и всё что пропустил bot.players ─
+    for (const e of Object.values(bot.entities || {})) {
+      if (!e?.position || e === bot.entity) continue;
+      // Игроков уже взяли из bot.players — пропускаем, кроме нашей известной цели
+      const hasUsername = typeof e.username === 'string' && e.username.length > 0;
+      const isPlayer = e.type === 'player' || hasUsername;
+      if (isPlayer) {
+        // Если нет в bot.players (редко) — допускаем если знаем имя
+        const uname2 = hasUsername ? e.username.toLowerCase() : null;
+        if (!uname2 || (uname2 !== this._lastTargetName && this._teammates.has(uname2))) continue;
+        if (uname2 === botName) continue;
+      } else {
+        const isMob = e.type === 'mob' || e.type === 'hostile';
+        if (!isMob) continue;
+      }
+      // isValid=false — пропускаем если не наша известная цель
+      if (e.isValid === false) {
+        const uname3 = hasUsername ? e.username?.toLowerCase() : null;
+        if (!uname3 || uname3 !== this._lastTargetName) continue;
+      }
+      if (hasUsername && this._teammates.has(e.username.toLowerCase())) continue;
+      let d;
+      try { d = myPos.distanceTo(e.position); } catch { continue; }
+      if (isNaN(d) || d >= minDist) continue;
+      minDist = d; closest = e;
     }
 
     // Sticky target: if entity disappeared from BOTH bot.entities and bot.players,
