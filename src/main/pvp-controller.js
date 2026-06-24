@@ -761,10 +761,32 @@ class PvpController {
       } catch {}
     }
 
+    // Sticky target: if entity disappeared from BOTH bot.entities and bot.players,
+    // keep the stale object reference for up to 3 seconds.
+    // The numeric entity ID on the stale object is still valid — bot.attack() will land.
+    if (!closest && this._stickyTarget && this._stickyTarget !== bot.entity) {
+      const stickyAge = Date.now() - (this._stickyTargetTs || 0);
+      if (stickyAge < 3000) {
+        try {
+          const stickyPos = this._stickyTarget.position;
+          if (stickyPos) {
+            let d;
+            try { d = myPos.distanceTo(stickyPos); } catch {}
+            if (!isNaN(d) && d < 24) {
+              closest = this._stickyTarget;
+              this._log(`🕯 Sticky цель (stale ref ${Math.round(stickyAge)}мс): ${this._stickyTarget.username || '?'}`);
+            }
+          }
+        } catch {}
+      }
+    }
+
     if (closest) {
       const uname = typeof closest.username === 'string' ? closest.username.toLowerCase() : null;
       if (uname) this._lastTargetName = uname;
-      this._targetLostAt = 0;
+      this._stickyTarget    = closest;
+      this._stickyTargetTs  = Date.now();
+      this._targetLostAt    = 0;
     } else if (this._target && !this._targetLostAt) {
       this._targetLostAt = Date.now();
     }

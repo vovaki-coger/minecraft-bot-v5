@@ -81,6 +81,18 @@ const SERVER_PROFILES: ServerProfile[] = [
   },
 ];
 
+function loadLocalPvpSettings(botId: string): Record<string, any> | null {
+  try {
+    const raw = localStorage.getItem(`pvp_settings_${botId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function saveLocalPvpSettings(botId: string, s: Record<string, any>) {
+  try { localStorage.setItem(`pvp_settings_${botId}`, JSON.stringify(s)); } catch {}
+}
+
+
 export default function PvpTab() {
   // ── Получаем updateBotConfigInStore для синхронизации store после save ──
   const bots = useAppStore(s => s.bots);
@@ -108,22 +120,35 @@ export default function PvpTab() {
 
   const activeProfile = SERVER_PROFILES.find(p => p.id === serverProfile) || SERVER_PROFILES[3];
 
-  // ── Читаем из store ТОЛЬКО при смене бота (bot?.id) ──────────────────
-  // После save — store обновляется через updateBotConfigInStore,
-  // поэтому при возврате на вкладку useEffect увидит актуальные данные
+  // ── Читаем настройки при смене бота ──────────────────────────────
+  // localStorage — первичный источник (auto-saves на каждое изменение),
+  // bot.config (electron-store) — fallback для первого запуска
   useEffect(() => {
     if (!bot) return;
     const cfg = bot.config as any;
-    setTeammates(Array.isArray(cfg.teammates) ? cfg.teammates : []);
-    setCustomPotions(cfg.pvpCustomPotions || []);
-    setAutoTarget(cfg.pvpAutoTarget !== false);
-    setAttackRange(cfg.pvpAttackRange || 4.5);
+    const local = loadLocalPvpSettings(bot.id);
+    setTeammates(local?.teammates       ?? (Array.isArray(cfg.teammates) ? cfg.teammates : []));
+    setCustomPotions(local?.customPotions  ?? cfg.pvpCustomPotions ?? []);
+    setAutoTarget(local?.autoTarget       ?? (cfg.pvpAutoTarget !== false ? true : false));
+    setAttackRange(local?.attackRange      ?? cfg.pvpAttackRange ?? 4.5);
     setPvpActive((bot as any).pvpMode || false);
-    setServerProfile(cfg.pvpServerProfile || "custom");
-    setGappleCooldown(cfg.pvpGappleCooldown ?? 30);
-    setEnchantedGappleCooldown(cfg.pvpEnchantedGappleCooldown ?? 120);
-    setPearlCooldown(cfg.pvpPearlCooldown ?? 16);
+    setServerProfile(local?.serverProfile  ?? cfg.pvpServerProfile ?? "custom");
+    setGappleCooldown(local?.gappleCooldown ?? cfg.pvpGappleCooldown ?? 30);
+    setEnchantedGappleCooldown(local?.enchantedGappleCooldown ?? cfg.pvpEnchantedGappleCooldown ?? 120);
+    setPearlCooldown(local?.pearlCooldown  ?? cfg.pvpPearlCooldown ?? 16);
   }, [bot?.id]);
+
+  // ── Auto-save в localStorage при любом изменении настроек ─────────
+  useEffect(() => {
+    if (!bot?.id) return;
+    const timer = setTimeout(() => {
+      saveLocalPvpSettings(bot.id, {
+        teammates, customPotions, autoTarget, attackRange,
+        serverProfile, gappleCooldown, enchantedGappleCooldown, pearlCooldown,
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [bot?.id, teammates, customPotions, autoTarget, attackRange, serverProfile, gappleCooldown, enchantedGappleCooldown, pearlCooldown]);
 
   // Слушаем события обучения нейросети
   useEffect(() => {
