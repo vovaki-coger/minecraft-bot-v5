@@ -1254,6 +1254,7 @@ class BotManager {
     if (instance.aiBrain) {
       try { instance.aiBrain.stopAutonomous(); } catch {}
       instance._aiBrainWasActive = !!(instance.aiEnabled);
+      instance.aiEnabled = false; // FIX: полностью отключаем чтобы chat-хендлер не вызывал Ollama
       log.info('[BotManager] PVP: Ollama AI приостановлен');
     }
     if (instance.agentLoop) {
@@ -1358,8 +1359,9 @@ class BotManager {
     } catch {}
 
     // ── Возобновляем Ollama/SurvivorAI ──────────────────────────────
-    if (instance._aiBrainWasActive && instance.aiBrain && instance.aiEnabled) {
+    if (instance._aiBrainWasActive && instance.aiBrain) {
       try {
+        instance.aiEnabled = true; // FIX: восстанавливаем флаг который занулили при старте PVP
         instance.aiBrain.startAutonomous(10000);
         instance._aiBrainWasActive = false;
         log.info(`[BotManager] PVP stop: Ollama AI возобновлён`);

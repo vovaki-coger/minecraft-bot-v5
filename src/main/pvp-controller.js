@@ -296,16 +296,16 @@ class PvpController {
       }
 
       // 2. ЕДА по HP-логике
-      // FIX: не едим если враг < 6 блоков (атакуем сначала, иначе вечный цикл еды)
       const eatMode = this._shouldEat(hp, food);
-      if (eatMode && this._forceAttack === 0 && dist > 6) {
-        this._log(`🍗 Едим: HP=${hp.toFixed(1)}, режим=${eatMode}, dist=${dist.toFixed(1)}`);
+      // FIX: если HP ≤ 8 — едим даже если враг < 6 блоков (иначе бот умирает, не поев)
+      const urgentEat = hp <= 8 && !!eatMode;
+      if (eatMode && this._forceAttack === 0 && (dist > 6 || urgentEat)) {
+        this._log(`🍗 Едим: HP=${hp.toFixed(1)}, режим=${eatMode}, dist=${dist.toFixed(1)}${urgentEat ? ' [СРОЧНО]' : ''}`);
         await this._doEatSmart(bot, eatMode);
-        // forceAttack уже установлен в _doEatSmart.finally (20 тиков = 1.6с атаки)
         this._scheduleTick(350);
         return;
       }
-      if (eatMode && dist <= 6) {
+      if (eatMode && dist <= 6 && !urgentEat) {
         this._log(`⚔️ Враг близко dist=${dist.toFixed(1)} — бьём, не едим (HP=${hp.toFixed(1)})`);
       }
 
@@ -470,8 +470,13 @@ class PvpController {
       while (bot.entity.onGround && waited < 350) { await sleep(20); waited += 20; }
       try { bot.setControlState('jump', false); } catch {}
 
-      // Ждём пик прыжка (~90мс от отрыва) и начало падения — атакуем ПАДАЯ (crits требуют onGround=false)
-      await sleep(90 + rand(0, 20));
+      // FIX: ждём НАЧАЛО ПАДЕНИЯ velocity.y < -0.02 (crits в MC требуют нисходящей траектории)
+      // Vanilla: прыжок ~300мс до пика. 90мс — ещё восход, крит НЕ регистрируется.
+      let fallWait = 0;
+      while (fallWait < 450 && (bot.entity?.velocity?.y ?? 0) >= -0.02) {
+        await sleep(20);
+        fallWait += 20;
+      }
 
       // FIX: прицел на ТЕЛО цели (y+1.0 = центр тела), НЕ на голову и не в небо
       // Во время прыжка бот выше → pitch автоматически смотрит ВНИЗ на тело
@@ -591,7 +596,7 @@ class PvpController {
       this._isEating      = false;
       this._isDoingAction = false;
       // FIX: если нечего было есть — ставим большой форс-атак чтобы не крутиться в цикле
-      this._forceAttack = ateAnything ? 20 : 40;
+      this._forceAttack = ateAnything ? 12 : 40;
       if (!ateAnything) {
         this._log('⚠️ Нечего есть (нет еды/гапла или КД) — форс-атака 40 тиков');
       }
@@ -731,7 +736,7 @@ class PvpController {
       if (isSplash) {
         // Бросаем вверх на себя (падает на нас)
         const curYaw = bot.entity?.yaw ?? 0;
-        try { await bot.look(curYaw, -Math.PI * 0.42, false); } catch {}
+        try { await bot.look(curYaw, -Math.PI / 2, false); } catch {} // Straight up → поtion lands on bot
         await sleep(40);
         bot.activateItem();
         this._addChat("💊 Зелье (бросок)!", "system");
