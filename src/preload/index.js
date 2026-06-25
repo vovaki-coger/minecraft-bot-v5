@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     startAnarchy: (id, opts) => ipcRenderer.invoke("bot:startAnarchy", id, opts),
     stopAnarchy: (id) => ipcRenderer.invoke("bot:stopAnarchy", id),
     getAnarchyState: (id) => ipcRenderer.invoke("bot:getAnarchyState", id),
+    // ── Шахтёр ─────────────────────────────────────────────────────
+    startExcavate: (id, args) => ipcRenderer.invoke("bot:startExcavate", id, args),
+    stopExcavate: (id) => ipcRenderer.invoke("bot:stopExcavate", id),
     // ── Ферма ──────────────────────────────────────────────────────
     startFarm: (id, opts) => ipcRenderer.invoke("bot:startFarm", id, opts),
     stopFarm: (id) => ipcRenderer.invoke("bot:stopFarm", id),
@@ -77,6 +80,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       "bot:aiToggled", "bot:windowOpen", "bot:windowClose", "bot:modelDetected",
       "bot:anarchyStarted", "bot:anarchyStopped", "bot:anarchyPhase", "bot:anarchyLog",
       "bot:farmStarted", "bot:farmStopped", "bot:farmLog",
+      "bot:excavateProgress", "bot:excavateDone",
       "bot:pvpStarted", "bot:pvpStopped", "bot:pvpToggled", "bot:pvpBrainTraining", "bot:pvpBrainReady",
       "bot:chestOpened", "bot:chestClosed",
       "ollama:pullProgress",

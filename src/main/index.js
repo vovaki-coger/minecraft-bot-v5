@@ -115,6 +115,10 @@ function setupIpcHandlers() {
   ipcMain.handle("bot:startFarm", (_e, botId, opts) => botManager.startFarmTask(botId, opts));
   ipcMain.handle("bot:stopFarm", (_e, botId) => botManager.stopAction(botId));
 
+  // ── Шахтёр ────────────────────────────────────────────────────────────
+  ipcMain.handle("bot:startExcavate", (_e, botId, args) => botManager.startExcavateTask(botId, args));
+  ipcMain.handle("bot:stopExcavate", (_e, botId) => botManager.stopExcavateTask(botId));
+
   // ── PvP ──────────────────────────────────────────────────────────────────
   ipcMain.handle("bot:startPvp", (_e, botId, opts) => botManager.startPvpTask(botId, opts));
   ipcMain.handle("bot:stopPvp", (_e, botId) => botManager.stopPvpMode(botId));
