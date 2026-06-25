@@ -123,23 +123,38 @@ function setupIpcHandlers() {
   ipcMain.handle("bot:resetPvpBrain", async () => {
     const fs = require("fs");
     const { setForceRetrain } = require("./pvp-brain");
-    // 1. Ставим флаг в памяти — гарантирует переобучение независимо от файловой системы
+
+    // 1. Ставим флаг — гарантирует переобучение при следующем запуске PVP
     setForceRetrain();
-    // 2. Удаляем файл весов чтобы он не загрузился при следующем запуске приложения
+
+    // 2. Удаляем файл весов
     const weightsPath = path.join(__dirname, "../../pvp-weights.json");
     try {
       if (fs.existsSync(weightsPath)) {
         fs.unlinkSync(weightsPath);
         log.info("[PvpBrain] Веса сброшены: " + weightsPath);
-        return { ok: true, path: weightsPath };
+      } else {
+        log.info("[PvpBrain] forceRetrain установлен (файла не было)");
       }
-      // Файла нет, но флаг уже стоит — этого достаточно
-      log.info("[PvpBrain] forceRetrain установлен (файла не было)");
-      return { ok: true, reason: "Файл уже отсутствовал, флаг установлен" };
     } catch (err) {
       log.error("[PvpBrain] Ошибка сброса весов:", err.message);
       return { ok: false, reason: err.message };
     }
+
+    // 3. КЛЮЧЕВОЕ: останавливаем все запущенные PvpController.
+    //    Без этого: если PVP уже работал, isRunning()=true → startPvpTask делает ранний return
+    //    → новый PvpBrain не создаётся → старый brain.ready=true → экран обучения не появляется.
+    //    После остановки пользователь нажимает Start PVP → создаётся свежий PvpBrain с forceRetrain → обучение.
+    if (botManager) {
+      for (const [botId, instance] of (botManager.bots || [])) {
+        if (instance._pvpController?.isRunning()) {
+          log.info(`[PvpBrain] Останавливаем PvpController бота ${botId} для пересоздания мозга`);
+          botManager.stopPvpMode(botId);
+        }
+      }
+    }
+
+    return { ok: true };
   });
 
   // ── Inventory click ───────────────────────────────────────────────────────
