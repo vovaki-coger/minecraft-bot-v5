@@ -774,6 +774,9 @@ class TaskManager {
       // ── Еда при голоде ────────────────────────────────────────────────────
       await this._eatIfHungry();
 
+      // ── Еда при голоде ────────────────────────────────────────────────────
+      await this._eatIfHungry();
+
       // ── Критически мало HP → отступаем ──────────────────────────────────
       if (myHp <= 5 && !retreating) {
         retreating = true;
@@ -1017,6 +1020,7 @@ class TaskManager {
           const b2 = this.bot.blockAt(new Vec3(x, y, z));
           if (!b2 || SKIP.has(b2.name) || !b2.diggable) { skipped++; continue; }
 
+          await this._eatIfHungry();
           await this._eatIfHungry();
           try {
             await this.bot.lookAt(b2.position.offset(0.5,0.5,0.5),true).catch(()=>{});
