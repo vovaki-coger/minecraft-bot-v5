@@ -26,7 +26,10 @@ const { AIBrain } = require("./ai-brain");
 const { AnarchyProtocol } = require("./anarchy-protocol");
 const { LobbyHandler } = require("./lobby-handler");
 const { AntiDetect } = require("./anti-detect");
-const { PvpController } = require("./pvp-controller");
+const { PvpController }  = require("./pvp-controller");
+const { FarmWheatBrain } = require("./farm-wheat-brain");
+const { FarmTreeBrain }  = require("./farm-tree-brain");
+const { MinerBrain }     = require("./miner-brain");
 
 const RUSSIAN_OVERRIDE = `ВАЖНО: Ты общаешься НА РУССКОМ ЯЗЫКЕ. Все твои ответы должны быть на русском. `;
 
@@ -975,6 +978,11 @@ class BotManager {
     instance.aiBrain?.stopAutonomous();
     instance.taskManager?.stopAll();
     instance.survivorAI?.stop();
+    // Восстанавливаем AI если была остановлена ферма/шахтёр
+    if (instance._farmTaskRunning) {
+      instance._farmTaskRunning = false;
+      this._restoreFarmAI(botId);
+    }
     this._addChat(instance, "system", "⛔ Действие остановлено");
     this.emit("bot:actionStopped", { botId });
   }
@@ -1232,11 +1240,77 @@ class BotManager {
   startFarmTask(botId, opts) {
     const instance = this.bots.get(botId);
     if (!instance?.taskManager) throw new Error('Бот не подключён или taskManager недоступен');
+
+    // ── Отключаем Ollama на время фармы (как PVP) ──────────────────────────
+    if (instance.aiBrain) {
+      try { instance.aiBrain.stopAutonomous(); } catch {}
+      instance._aiBrainWasActiveFarm = !!(instance.aiEnabled);
+      instance.aiEnabled = false;
+      log.info('[BotManager] Farm: Ollama AI приостановлен');
+    }
+    if (instance.agentLoop) {
+      try { instance.agentLoop.stop(); } catch {}
+      instance._agentLoopWasActiveFarm = true;
+      instance.agentLoop = null;
+    }
+    if (instance.survivorAI) {
+      try { instance.survivorAI.stop(); } catch {}
+      instance._survivorWasActiveFarm = true;
+    }
+
+    // ── Инициализируем нейросеть фарма ──────────────────────────────────────
+    const isTree = opts.type === 'trees';
+    if (isTree) {
+      if (!instance._farmBrain || !(instance._farmBrain instanceof FarmTreeBrain)) {
+        instance._farmBrain = new FarmTreeBrain();
+        instance._farmBrain._onProgress = (pct, msg) =>
+          this.emit('bot:farmBrainTraining', { botId, brainType: 'tree', pct, msg });
+        instance._farmBrain._onReady = () =>
+          this.emit('bot:farmBrainReady', { botId, brainType: 'tree' });
+      }
+      this._emitActionLog(botId, 'farm', instance._farmBrain.ready
+        ? '▶ Ферма деревьев | 🧠 нейросеть готова'
+        : '▶ Ферма деревьев | 🧠 нейросеть обучается...');
+    } else {
+      if (!instance._farmBrain || !(instance._farmBrain instanceof FarmWheatBrain)) {
+        instance._farmBrain = new FarmWheatBrain();
+        instance._farmBrain._onProgress = (pct, msg) =>
+          this.emit('bot:farmBrainTraining', { botId, brainType: 'wheat', pct, msg });
+        instance._farmBrain._onReady = () =>
+          this.emit('bot:farmBrainReady', { botId, brainType: 'wheat' });
+      }
+      this._emitActionLog(botId, 'farm', instance._farmBrain.ready
+        ? '▶ Ферма пшеницы | 🧠 нейросеть готова'
+        : '▶ Ферма пшеницы | 🧠 нейросеть обучается...');
+    }
+
     const taskName =
       opts.type === 'crops' ? 'farm_crops' :
       opts.type === 'quick' ? 'farm_quick' :
       opts.type === 'trees' ? 'farm_trees_full' : 'farm_crops';
-    return instance.taskManager.runTask(taskName, opts);
+
+    instance._farmTaskRunning = true;
+    return instance.taskManager.runTask(taskName, opts).finally(() => {
+      instance._farmTaskRunning = false;
+      this._restoreFarmAI(botId);
+    });
+  }
+
+  _restoreFarmAI(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance) return;
+    if (instance._aiBrainWasActiveFarm && instance.aiBrain) {
+      try {
+        instance.aiEnabled = true;
+        instance.aiBrain.startAutonomous(10000);
+        instance._aiBrainWasActiveFarm = false;
+        log.info('[BotManager] Farm stop: Ollama AI возобновлён');
+      } catch (e) { log.warn('[BotManager] farm resume aiBrain:', e.message); }
+    }
+    if (instance._survivorWasActiveFarm && instance.survivorAI) {
+      try { instance.survivorAI.start?.(); instance._survivorWasActiveFarm = false; } catch {}
+    }
+    this._emitActionLog(botId, 'farm', '⏹ Фарм остановлен');
   }
 
   // ── PvP (нейросеть PvpController) ────────────────────────────────────────
@@ -1327,15 +1401,59 @@ class BotManager {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error('Бот не подключён');
     if (!instance.taskManager) throw new Error('TaskManager не инициализирован');
+    // ── Отключаем Ollama на время добычи (шахтёр) ──────────────────────────
+    if (instance.aiBrain) {
+      try { instance.aiBrain.stopAutonomous(); } catch {}
+      instance._aiBrainWasActiveMiner = !!(instance.aiEnabled);
+      instance.aiEnabled = false;
+      log.info('[BotManager] Miner: Ollama AI приостановлен');
+    }
+    if (instance.survivorAI) {
+      try { instance.survivorAI.stop(); } catch {}
+      instance._survivorWasActiveMiner = true;
+    }
+
+    // ── Инициализируем нейросеть шахтёра ─────────────────────────────────
+    if (!instance._minerBrain) {
+      instance._minerBrain = new MinerBrain();
+      instance._minerBrain._onProgress = (pct, msg) =>
+        this.emit('bot:minerBrainTraining', { botId, pct, msg });
+      instance._minerBrain._onReady = () =>
+        this.emit('bot:minerBrainReady', { botId });
+    }
+    this._emitActionLog(botId, 'task', instance._minerBrain.ready
+      ? '⛏ Шахтёр запущен | 🧠 нейросеть готова'
+      : '⛏ Шахтёр запущен | 🧠 нейросеть обучается...');
+
     // Запускаем в фоне (не await)
-    instance.taskManager.runTask("excavate", args).catch(e => log.warn('[excavate] err:', e.message));
+    instance.taskManager.runTask("excavate", args)
+      .catch(e => log.warn('[excavate] err:', e.message))
+      .finally(() => this._restoreMinerAI(botId));
     return { ok: true };
+  }
+
+  _restoreMinerAI(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance) return;
+    if (instance._aiBrainWasActiveMiner && instance.aiBrain) {
+      try {
+        instance.aiEnabled = true;
+        instance.aiBrain.startAutonomous(10000);
+        instance._aiBrainWasActiveMiner = false;
+        log.info('[BotManager] Miner stop: Ollama AI возобновлён');
+      } catch (e) { log.warn('[BotManager] miner resume:', e.message); }
+    }
+    if (instance._survivorWasActiveMiner && instance.survivorAI) {
+      try { instance.survivorAI.start?.(); instance._survivorWasActiveMiner = false; } catch {}
+    }
+    this._emitActionLog(botId, 'task', '⏹ Шахтёр остановлен');
   }
 
   stopExcavateTask(botId) {
     const instance = this.bots.get(botId);
     if (!instance?.taskManager) return { ok: false };
     instance.taskManager.stopAll().catch(() => {});
+    this._restoreMinerAI(botId);
     return { ok: true };
   }
 
