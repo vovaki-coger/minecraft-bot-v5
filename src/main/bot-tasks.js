@@ -133,6 +133,7 @@ class TaskManager {
       await this._eatIfHungry();
       await this._gotoNearest(block.position, 2);
       if (!this._running) break;
+      await this._equipBestTool(block);
       await this.bot.lookAt(block.position.offset(0.5,0.5,0.5),true).catch(()=>{});
       await this.bot.dig(block).catch(() => {});
       collected++;
@@ -664,6 +665,7 @@ class TaskManager {
         await this._eatIfHungry();
         await this._gotoNearest(logBlock.position, 2);
         if (!this._running) break;
+        await this._equipBestTool(logBlock);
         await this.bot.lookAt(logBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
         await this.bot.dig(logBlock).catch(() => {});
         await this._sleep(80);
@@ -1023,6 +1025,7 @@ class TaskManager {
           await this._eatIfHungry();
           await this._eatIfHungry();
           try {
+            await this._equipBestTool(b2);
             await this.bot.lookAt(b2.position.offset(0.5,0.5,0.5),true).catch(()=>{});
             await this.bot.dig(b2);
             dug++;
@@ -1039,6 +1042,43 @@ class TaskManager {
     this.emit("bot:excavateDone", { botId: this.instance.id, dug, skipped });
   }
 
+
+
+  // ── Авто-выбор инструмента перед ломкой ───────────────────────────────────
+  async _equipBestTool(block) {
+    if (!block || !this.bot) return;
+    const name = block.name || "";
+    // Типы блоков → предпочтительный инструмент
+    const isWood    = /log|wood|planks|bamboo|fence|door|barrel|chest|craft/.test(name);
+    const isStone   = /stone|cobble|granite|diorite|andesite|basalt|blackstone|brick|ore|obsidian|netherrack|deepslate|sandstone|quartz|purpur|end_stone|gravel|concrete/.test(name);
+    const isDirt    = /dirt|grass|sand|soul_sand|soul_soil|gravel|clay|mycelium|podzol|mud|rooted/.test(name);
+    const isLeaves  = /leaves/.test(name);
+    const isSword   = /cobweb/.test(name);
+
+    let toolPattern = null;
+    if      (isWood)   toolPattern = /axe/;
+    else if (isStone)  toolPattern = /pickaxe/;
+    else if (isDirt)   toolPattern = /shovel/;
+    else if (isLeaves) toolPattern = /shears|sword/;
+    else if (isSword)  toolPattern = /sword/;
+
+    if (!toolPattern) return; // рукой нормально
+
+    // Ищем лучший инструмент по уровню: netherite > diamond > iron > stone > golden > wooden
+    const LEVELS = ["netherite","diamond","iron","stone","golden","wooden"];
+    let best = null, bestLevel = 99;
+    for (const item of this.bot.inventory.items()) {
+      if (toolPattern.test(item.name)) {
+        const lvl = LEVELS.findIndex(l => item.name.includes(l));
+        const eff = lvl === -1 ? 98 : lvl;
+        if (eff < bestLevel) { bestLevel = eff; best = item; }
+      }
+    }
+
+    if (best) {
+      await this.bot.equip(best, "hand").catch(() => {});
+    }
+  }
 
   // ── Еда при голоде < 6 баров (12 очков) ─────────────────────────────────
   async _eatIfHungry() {
@@ -1064,6 +1104,7 @@ class TaskManager {
       await this._gotoNearest(block.position, 2);
       if (!this._running) return;
     }
+    await this._equipBestTool(block);
     await this.bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true).catch(() => {});
     await this.bot.dig(block).catch(() => {});
   }
