@@ -1321,6 +1321,23 @@ class BotManager {
     return { pvpMode: true };
   }
 
+
+  startExcavateTask(botId, args) {
+    const instance = this.bots.get(botId);
+    if (!instance?.bot) throw new Error('Бот не подключён');
+    if (!instance.taskManager) throw new Error('TaskManager не инициализирован');
+    // Запускаем в фоне (не await)
+    instance.taskManager.runTask("excavate", args).catch(e => log.warn('[excavate] err:', e.message));
+    return { ok: true };
+  }
+
+  stopExcavateTask(botId) {
+    const instance = this.bots.get(botId);
+    if (!instance?.taskManager) return { ok: false };
+    instance.taskManager.stopAll().catch(() => {});
+    return { ok: true };
+  }
+
   stopPvpMode(botId) {
     const instance = this.bots.get(botId);
     if (!instance) return { pvpMode: false };
