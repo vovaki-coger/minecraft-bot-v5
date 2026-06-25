@@ -152,22 +152,28 @@ export default function PvpTab() {
   }, [bot?.id, teammates, customPotions, autoTarget, attackRange, serverProfile, gappleCooldown, enchantedGappleCooldown, pearlCooldown]);
 
   // Слушаем события обучения нейросети
+  // FIX: preload имеет api.on(channel, cb), а не api.onBotEvent
   useEffect(() => {
     const api = (window as any).electronAPI;
-    if (!api?.onBotEvent) return;
-    const unsub = api.onBotEvent((ch: string, data: any) => {
+    if (typeof api?.on !== "function") return;
+    const unsubs: Array<() => void> = [];
+
+    const u1 = api.on("bot:pvpBrainTraining", (data: any) => {
       if (!bot || data?.botId !== bot.id) return;
-      if (ch === "bot:pvpBrainTraining") {
-        setBrainTraining(true);
-        setBrainPct(data.pct ?? 0);
-        setBrainMsg(data.msg ?? "Обучение...");
-      }
-      if (ch === "bot:pvpBrainReady") {
-        setBrainTraining(false);
-        setBrainPct(100);
-      }
+      setBrainTraining(true);
+      setBrainPct(data.pct ?? 0);
+      setBrainMsg(data.msg ?? "Обучение...");
     });
-    return () => { try { unsub?.(); } catch {} };
+    if (typeof u1 === "function") unsubs.push(u1);
+
+    const u2 = api.on("bot:pvpBrainReady", (data: any) => {
+      if (!bot || data?.botId !== bot.id) return;
+      setBrainTraining(false);
+      setBrainPct(100);
+    });
+    if (typeof u2 === "function") unsubs.push(u2);
+
+    return () => unsubs.forEach(u => { try { u(); } catch {} });
   }, [bot?.id]);
 
   // Синхронизируем pvpActive при изменении pvpMode в store
