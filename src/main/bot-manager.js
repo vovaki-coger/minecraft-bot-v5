@@ -24,6 +24,7 @@ const { parseAndy4Response, executeAndy4Command, isAndy4Model, stripThinkBlocks 
 const { AgentLoop } = require("./agent-loop");
 const { AIBrain } = require("./ai-brain");
 const { AnarchyProtocol } = require("./anarchy-protocol");
+const { BrewingTask } = require("./brewing-task");
 const { LobbyHandler } = require("./lobby-handler");
 const { AntiDetect } = require("./anti-detect");
 const { PvpController }  = require("./pvp-controller");
@@ -1098,11 +1099,36 @@ class BotManager {
     return { success: true };
   }
 
-  async startAnarchyProtocol(botId, opts) {
+  async async startAnarchyProtocol(botId, opts) {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error("Бот не подключён");
     instance.survivorAI?.stop();
     instance.aiBrain?.stopAutonomous();
+
+    // ── Отключаем Ollama на время анархии (как PVP/шахтёр) ─────────────────
+    instance._aiBrainWasActiveAnarchy = !!(instance.aiEnabled);
+    instance.aiEnabled = false;
+    log.info("[BotManager] Anarchy: Ollama AI приостановлен");
+
+    // ── Зельеварение — отдельная задача ────────────────────────────────────
+    if (opts && opts.task === "brew_potions") {
+      instance._brewingTask = new BrewingTask(instance, this.emit, {
+        potionId:   opts.potionId   || "strength_1",
+        wantSplash: opts.wantSplash || false,
+        wantLong:   opts.wantLong   || false,
+        batchSize:  opts.batchSize  || 3,
+      });
+      this.emit("bot:anarchyStarted", { botId });
+      try {
+        await instance._brewingTask.run();
+      } finally {
+        instance._brewingTask = null;
+        this._restoreAnarchyAI(instance);
+        this.emit("bot:anarchyStopped", { botId });
+      }
+      return { success: true };
+    }
+
     if (!instance.anarchyProtocol) {
       instance.anarchyProtocol = new AnarchyProtocol(instance, this.ollamaManager, this.emit);
     }
@@ -1114,10 +1140,19 @@ class BotManager {
     const instance = this.bots.get(botId);
     if (!instance) return { success: false };
     instance.anarchyProtocol?.stop();
-    if (instance.aiBrain && instance.aiEnabled) {
-      instance.aiBrain.startAutonomous(10000);
-    }
+    instance._brewingTask?.stop();
+    instance._brewingTask = null;
+    this._restoreAnarchyAI(instance);
     return { success: true };
+  }
+
+  _restoreAnarchyAI(instance) {
+    if (instance._aiBrainWasActiveAnarchy) {
+      instance.aiEnabled = true;
+      if (instance.aiBrain) instance.aiBrain.startAutonomous(10000);
+      log.info("[BotManager] Anarchy stop: Ollama AI возобновлён");
+    }
+    instance._aiBrainWasActiveAnarchy = false;
   }
 
   getAnarchyState(botId) {
