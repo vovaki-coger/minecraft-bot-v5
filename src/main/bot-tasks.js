@@ -130,9 +130,8 @@ class TaskManager {
         continue;
       }
       exploreAttempts = 0;
-      await this.bot.pathfinder.goto(
-        new goals.GoalBlock(block.position.x, block.position.y, block.position.z)
-      ).catch(() => {});
+      await this._eatIfHungry();
+      await this._gotoNearest(block.position, 2);
       if (!this._running) break;
       await this.bot.lookAt(block.position.offset(0.5,0.5,0.5),true).catch(()=>{});
       await this.bot.dig(block).catch(() => {});
@@ -150,9 +149,8 @@ class TaskManager {
     while (this._running && collected < count) {
       const block = this.bot.findBlock({ matching: blockType.id, maxDistance: 32 });
       if (!block) { this._chat("Не нашёл рядом!"); break; }
-      await this.bot.pathfinder.goto(
-        new goals.GoalBlock(block.position.x, block.position.y, block.position.z)
-      ).catch(() => {});
+      await this._eatIfHungry();
+      await this._gotoNearest(block.position, 2);
       if (!this._running) break;
       await this.bot.lookAt(block.position.offset(0.5,0.5,0.5),true).catch(()=>{});
       await this.bot.dig(block).catch(() => {});
@@ -663,7 +661,8 @@ class TaskManager {
           point: tp,
         });
         if (!logBlock) { treesFound = false; break; }
-        await this._gotoNearest(logBlock.position, 3);
+        await this._eatIfHungry();
+        await this._gotoNearest(logBlock.position, 2);
         if (!this._running) break;
         await this.bot.lookAt(logBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
         await this.bot.dig(logBlock).catch(() => {});
@@ -771,6 +770,9 @@ class TaskManager {
 
       const myHp = this.bot.health ?? 20;
       const dist = target.position.distanceTo(this.bot.entity.position);
+
+      // ── Еда при голоде ────────────────────────────────────────────────────
+      await this._eatIfHungry();
 
       // ── Критически мало HP → отступаем ──────────────────────────────────
       if (myHp <= 5 && !retreating) {
@@ -1015,6 +1017,7 @@ class TaskManager {
           const b2 = this.bot.blockAt(new Vec3(x, y, z));
           if (!b2 || SKIP.has(b2.name) || !b2.diggable) { skipped++; continue; }
 
+          await this._eatIfHungry();
           try {
             await this.bot.lookAt(b2.position.offset(0.5,0.5,0.5),true).catch(()=>{});
             await this.bot.dig(b2);
@@ -1030,6 +1033,35 @@ class TaskManager {
     }
     this._chat(`✅ Раскопка завершена! Выкопано: ${dug}, пропущено: ${skipped}`);
     this.emit("bot:excavateDone", { botId: this.instance.id, dug, skipped });
+  }
+
+
+  // ── Еда при голоде < 6 баров (12 очков) ─────────────────────────────────
+  async _eatIfHungry() {
+    if (!this.bot || !this._running) return;
+    if (this.bot.food > 12) return; // 6 баров × 2 = 12 очков, выше — не голод
+    const foodItem = this.bot.inventory.items().find(i =>
+      /apple|bread|beef|pork|chicken|mutton|salmon|carrot|potato|cookie|berry|steak|fish|melon_slice|baked_potato|mushroom_stew|rabbit_stew|suspicious_stew/.test(i.name)
+    );
+    if (!foodItem) return;
+    try {
+      await this.bot.equip(foodItem, 'hand').catch(() => {});
+      this.bot.activateItem();
+      await this._sleep(1600);
+      this.bot.deactivateItem();
+    } catch {}
+  }
+
+  // ── Подход + look + dig в радиусе 4 блоков ───────────────────────────────
+  async _approachAndDig(block) {
+    if (!block || !this._running) return;
+    const dist = block.position.distanceTo(this.bot.entity.position);
+    if (dist > 4) {
+      await this._gotoNearest(block.position, 2);
+      if (!this._running) return;
+    }
+    await this.bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true).catch(() => {});
+    await this.bot.dig(block).catch(() => {});
   }
 
   async _gotoNearest(pos, range = 3) {
