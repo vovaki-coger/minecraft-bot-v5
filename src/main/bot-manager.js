@@ -277,7 +277,7 @@ class BotManager {
       // Включаем спринт — без него pathfinder не может нормально ходить
       movements.allowSprinting = true;
       movements.allowParkour = true;
-      movements.canDig = true;
+      movements.canDig = false; // Не ломаем блоки в пути — иначе частицы и зависание
       movements.allow1by1towers = false;
       // Жидкость дорогая — бот не ходит по воде (анти-NoSlow флаг)
       try { movements.liquidCost = 100; } catch {}
@@ -286,10 +286,19 @@ class BotManager {
       try { movements.maxDropDown = 3; } catch {}
       bot.pathfinder.setMovements(movements);
 
-      // ── Knockback: при получении урона останавливаем pathfinder (позволяет физике отбросить бота) ──
-      bot.on('entityHurt', (entity) => {
-        if (entity !== bot.entity) return;
-        try { bot.pathfinder.stop(); } catch {}
+      // ── Knockback: health-событие = только HP нашего бота (entityHurt — для ДРУГИХ существ) ──
+      let _lastBotHP = bot.health ?? 20;
+      bot.on('health', () => {
+        const curHP = bot.health ?? 20;
+        if (curHP < _lastBotHP - 0.5) {
+          // Получили урон → останавливаем pathfinder → физика отрабатывает knockback
+          try { bot.pathfinder.stop(); } catch {}
+          // Если в воздухе — сбрасываем прыжок
+          if (!bot.entity?.onGround) {
+            try { bot.setControlState('jump', false); } catch {}
+          }
+        }
+        _lastBotHP = curHP;
       });
 
       // ── AntiDetect v2: login packet masking + ground flag + velocity + lookAt ──
