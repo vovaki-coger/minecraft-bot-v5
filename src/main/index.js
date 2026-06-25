@@ -128,7 +128,9 @@ function setupIpcHandlers() {
     setForceRetrain();
 
     // 2. Удаляем файл весов
-    const weightsPath = path.join(__dirname, "../../pvp-weights.json");
+    // FIX: matches the userData path used in pvp-brain.js _getWeightsPath()
+    const { app } = require('electron');
+    const weightsPath = path.join(app.getPath('userData'), 'pvp-weights.json');
     try {
       if (fs.existsSync(weightsPath)) {
         fs.unlinkSync(weightsPath);
@@ -138,13 +140,18 @@ function setupIpcHandlers() {
       }
     } catch (err) {
       log.error("[PvpBrain] Ошибка сброса весов:", err.message);
+      if (botManager) {
+        for (const [botId] of (botManager.bots || [])) {
+          try { botManager._emitActionLog(botId, 'pvp', '❌ Ошибка сброса мозга: ' + err.message); } catch {}
+        }
+      }
       return { ok: false, reason: err.message };
     }
 
     // 3. Шлём лог в UI всех ботов
     if (botManager) {
       for (const [botId] of (botManager.bots || [])) {
-        try { botManager._emitActionLog(botId, 'pvp', '🧠 Мозг сброшен! Нажмите Запуск PVP для нового обучения.'); } catch {}
+        try { botManager._emitActionLog(botId, 'pvp', '✅ Мозг сброшен успешно! Нажмите Запуск PVP — переобучение (~20с).'); } catch {}
       }
     }
 
