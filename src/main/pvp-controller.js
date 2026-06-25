@@ -214,6 +214,8 @@ class PvpController {
 
       const hp   = bot.health ?? 20;
       const food = bot.food   ?? 20;
+      // Защита: если у цели нет позиции — сбрасываем и ждём следующего тика
+      if (!this._target?.position) { this._target = null; this._scheduleTick(150); return; }
       const dist = bot.entity.position.distanceTo(this._target.position);
 
       // Лог каждые 5 тиков
@@ -793,6 +795,8 @@ class PvpController {
   }
 
   // ── ПОИСК ЦЕЛИ ────────────────────────────────────────────────────────────
+  // ПРАВИЛО: никогда не ставим closest = entity с position===null,
+  // иначе _tick падает в distanceTo(null) и бот молча перестаёт бить.
   _findTarget() {
     const { bot } = this.instance;
     if (!bot?.entity) { this._target = null; return; }
@@ -800,88 +804,65 @@ class PvpController {
     const myPos = bot.entity.position;
     const botName = (bot.username || '').toLowerCase();
 
-    // ── ПЕРВЫЙ ПРИОРИТЕТ: bot.players — самый надёжный источник для игроков ──
-    // bot.entities иногда теряет игрока (isValid=false, entity временно удалена),
-    // а bot.players всегда актуален пока игрок на сервере.
-    // ВАЖНО: entity.position может быть null если entity временно невалидна.
-    // В этом случае берём последнюю известную позицию из _stickyTarget.
+    // ── ПРИОРИТЕТ 1: bot.players ──────────────────────────────────────────
     for (const [pKey, pInfo] of Object.entries(bot.players || {})) {
       if (!pInfo?.entity) continue;
       const uname = (typeof pInfo.username === 'string' ? pInfo.username : pKey).toLowerCase();
       if (uname === botName || this._teammates.has(uname)) continue;
       const e = pInfo.entity;
       if (e === bot.entity) continue;
-      // Позиция: берём из entity или из sticky если entity.position временно null
-      let pos = e.position;
-      if (!pos && uname === this._lastTargetName && this._stickyTarget?.position) {
-        pos = this._stickyTarget.position;
-      }
-      if (!pos) continue;
-      let d;
-      try { d = myPos.distanceTo(pos); } catch { continue; }
-      if (isNaN(d) || d >= minDist) continue;
-      minDist = d; closest = e;
-    }
 
-    // ── ВТОРОЙ ПРИОРИТЕТ: bot.entities — мобы и всё что пропустил bot.players ─
-    for (const e of Object.values(bot.entities || {})) {
-      if (!e?.position || e === bot.entity) continue;
-      // Игроков уже взяли из bot.players — пропускаем, кроме нашей известной цели
-      const hasUsername = typeof e.username === 'string' && e.username.length > 0;
-      const isPlayer = e.type === 'player' || hasUsername;
-      if (isPlayer) {
-        // Если нет в bot.players (редко) — допускаем если знаем имя
-        const uname2 = hasUsername ? e.username.toLowerCase() : null;
-        if (!uname2 || (uname2 !== this._lastTargetName && this._teammates.has(uname2))) continue;
-        if (uname2 === botName) continue;
-      } else {
-        const isMob = e.type === 'mob' || e.type === 'hostile';
-        if (!isMob) continue;
+      if (!e.position) {
+        // position временно null (~80мс после удара) — продлеваем sticky и пропускаем
+        if (uname === this._lastTargetName) this._stickyTargetTs = Date.now();
+        continue; // ← НЕ ставим closest=e: null position → crash
       }
-      // isValid=false — пропускаем если не наша известная цель
-      if (e.isValid === false) {
-        const uname3 = hasUsername ? e.username?.toLowerCase() : null;
-        if (!uname3 || uname3 !== this._lastTargetName) continue;
-      }
-      if (hasUsername && this._teammates.has(e.username.toLowerCase())) continue;
+
       let d;
       try { d = myPos.distanceTo(e.position); } catch { continue; }
       if (isNaN(d) || d >= minDist) continue;
       minDist = d; closest = e;
     }
 
-    // Sticky target: if entity disappeared from BOTH bot.entities and bot.players,
-    // keep the stale object reference for up to 3 seconds.
-    // The numeric entity ID on the stale object is still valid — bot.attack() will land.
+    // ── ПРИОРИТЕТ 2: bot.entities — только мобы ───────────────────────────
+    for (const e of Object.values(bot.entities || {})) {
+      if (!e?.position || e === bot.entity) continue;
+      const hasUsername = typeof e.username === 'string' && e.username.length > 0;
+      if (hasUsername) continue; // игроков взяли из bot.players выше
+      const isMob = e.type === 'mob' || e.type === 'hostile';
+      if (!isMob || e.isValid === false) continue;
+      let d;
+      try { d = myPos.distanceTo(e.position); } catch { continue; }
+      if (isNaN(d) || d >= minDist) continue;
+      minDist = d; closest = e;
+    }
+
+    // ── Sticky: держим цель 6 сек после потери позиции ────────────────────
     if (!closest && this._stickyTarget && this._stickyTarget !== bot.entity) {
       const stickyAge = Date.now() - (this._stickyTargetTs || 0);
-      // FIX: расширяем окно до 6000мс (мало было 3000 — бот успевал выйти в режим «нет цели»)
       if (stickyAge < 6000) {
-        try {
-          // FIX: если position у entity пропала (полностью удалена), берём из bot.players
-          let stickyPos = this._stickyTarget.position;
-          if (!stickyPos && this._lastTargetName) {
-            try {
-              const players = bot.players || {};
-              const pe = players[this._lastTargetName] ||
-                         Object.values(players).find(p =>
-                           typeof p.username === 'string' &&
-                           p.username.toLowerCase() === this._lastTargetName);
-              if (pe?.entity?.position) {
-                stickyPos = pe.entity.position;
-                this._stickyTarget = pe.entity; // обновляем ссылку
-              }
-            } catch {}
-          }
-          if (stickyPos) {
-            let d;
-            try { d = myPos.distanceTo(stickyPos); } catch {}
-            if (!isNaN(d) && d < 30) {
-              closest = this._stickyTarget;
-              this._log(`🕯 Sticky цель (${Math.round(stickyAge)}мс): ${this._stickyTarget.username || '?'}`);
+        let stickyPos = this._stickyTarget.position;
+        if (!stickyPos && this._lastTargetName) {
+          try {
+            const players = bot.players || {};
+            const pe = players[this._lastTargetName] ||
+                       Object.values(players).find(p =>
+                         typeof p.username === 'string' &&
+                         p.username.toLowerCase() === this._lastTargetName);
+            if (pe?.entity?.position) {
+              stickyPos = pe.entity.position;
+              this._stickyTarget = pe.entity;
             }
+          } catch {}
+        }
+        if (stickyPos) {
+          let d;
+          try { d = myPos.distanceTo(stickyPos); } catch {}
+          if (!isNaN(d) && d < 30) {
+            closest = this._stickyTarget;
+            this._log(`🕯 Sticky (${Math.round(stickyAge)}мс): ${this._stickyTarget.username || '?'}`);
           }
-        } catch {}
+        }
       }
     }
 
@@ -924,13 +905,28 @@ class PvpController {
     }
   }
 
+  // Онлайн-обучение: бот учится на своих ошибках в реальном времени.
+  // Каждые 5 тиков (~400мс) сравниваем HP тогда и сейчас — если упало, действие было плохим.
   _trainBrain(bot, hp) {
-    if (!this._target || this._tickCount % 10 !== 0) return;
+    if (!this._target || this._tickCount % 5 !== 0) return;
     try {
       const features = this.brain._getFeatures?.(bot, this._target, [...this._teammates]);
       if (!features) return;
-      const wasGood = (bot.health ?? 20) >= this._lastHP - 0.5;
-      const actionMap = this._hitCount > 0 ? { attack: true } : { retreat: true };
+      const curHp  = bot.health ?? 20;
+      const hpDrop = this._lastHP - curHp;
+      const wasGood = hpDrop < 1.0; // потеря < 1 HP = действие нейтральное/хорошее
+
+      let actionMap;
+      if (hpDrop >= 2.0) {
+        actionMap = { retreat: true }; // получили сильный урон — надо было отступить
+      } else if (this._hitCount > 0 && hpDrop < 0.5) {
+        actionMap = { attack: true };  // ударили без потерь — продолжаем атаковать
+      } else if (this._tickCount % 2 === 0) {
+        actionMap = { strafe: true };  // нейтрально — учим страфингу
+      } else {
+        actionMap = { attack: true };
+      }
+
       this.brain.recordExperience(features, actionMap, wasGood);
     } catch {}
     this._lastHP = hp;
