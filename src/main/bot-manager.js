@@ -690,14 +690,17 @@ class BotManager {
           const now2 = Date.now();
           if (now2 - instance._lastAIResponse < 3000) return;
           instance._lastAIResponse = now2;
-          await instance.aiBrain.respondToPlayer(username, message).catch(() => {});
+          if (!_pvpNow) await instance.aiBrain.respondToPlayer(username, message).catch(() => {});
         }
         return;
       }
     }
 
+    // FIX: не запускаем задачи и не отвечаем через Ollama во время PVP
+    const _pvpNow = instance._pvpController?.isRunning();
+
     const scriptCmd = parseCommand(message, instance.config.nick);
-    if (scriptCmd) {
+    if (scriptCmd && !_pvpNow) {
       log.info("[Script] Task:", scriptCmd.task);
       if (scriptCmd.task === "come_to" || scriptCmd.task === "follow") scriptCmd.player = username;
       instance.taskManager?.runTask(scriptCmd.task, scriptCmd).catch((e) =>
@@ -712,7 +715,7 @@ class BotManager {
 
     if (instance.aiBrain && instance.aiEnabled) {
       log.info("[BotManager] Routing to AIBrain:", username, message);
-      await instance.aiBrain.respondToPlayer(username, message);
+      if (!_pvpNow) await instance.aiBrain.respondToPlayer(username, message);
       return;
     }
 
@@ -1247,12 +1250,17 @@ class BotManager {
     if (!instance?.bot) throw new Error('Бот не подключён');
     if (instance._pvpController?.isRunning()) return { pvpMode: true };
 
-    // ── Ставим Ollama/SurvivorAI на паузу пока активен PVP ──────────
-    // aiBrain.isRunning — это boolean-свойство, не функция!
+    // ── Полностью останавливаем Ollama/AgentLoop/SurvivorAI во время PVP ──
     if (instance.aiBrain) {
       try { instance.aiBrain.stopAutonomous(); } catch {}
       instance._aiBrainWasActive = !!(instance.aiEnabled);
       log.info('[BotManager] PVP: Ollama AI приостановлен');
+    }
+    if (instance.agentLoop) {
+      try { instance.agentLoop.stop(); } catch {}
+      instance._agentLoopWasActive = true;
+      instance.agentLoop = null;
+      log.info('[BotManager] PVP: AgentLoop остановлен');
     }
     if (instance.survivorAI) {
       try { await instance.survivorAI.stop(); } catch {}
@@ -1267,6 +1275,18 @@ class BotManager {
         instance._originalMovements = bot.pathfinder.movements;
       }
     } catch {}
+
+    // FIX: авто-сохраняем PVP настройки в config при каждом запуске PVP
+    if (opts && Object.keys(opts).length > 0) {
+      const pvpPatch = {};
+      if (opts.teammates       !== undefined) pvpPatch.teammates              = opts.teammates;
+      if (opts.gappleCooldown  !== undefined) pvpPatch.pvpGappleCooldown      = opts.gappleCooldown;
+      if (opts.enchantedGappleCooldown !== undefined) pvpPatch.pvpEnchantedGappleCooldown = opts.enchantedGappleCooldown;
+      if (opts.pearlCooldown   !== undefined) pvpPatch.pvpPearlCooldown        = opts.pearlCooldown;
+      if (opts.serverProfile   !== undefined) pvpPatch.pvpServerProfile        = opts.serverProfile;
+      Object.assign(instance.config, pvpPatch);
+      try { this.configManager.saveBotConfig(instance.config); } catch {}
+    }
 
     instance._pvpController = new PvpController(instance, this.emit);
     instance._pvpController.start(opts);
