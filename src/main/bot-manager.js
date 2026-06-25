@@ -1099,7 +1099,7 @@ class BotManager {
     return { success: true };
   }
 
-  async async startAnarchyProtocol(botId, opts) {
+  async startAnarchyProtocol(botId, opts) {
     const instance = this.bots.get(botId);
     if (!instance?.bot) throw new Error("Бот не подключён");
     instance.survivorAI?.stop();
