@@ -1646,6 +1646,7 @@ class PvpBrain {
     this.ready = false;
     this._onProgress = null; // (pct, msg) => void
     this._onReady = null;    // () => void
+    this._onlineTrainCount = 0; // счётчик онлайн-итераций (для лога в UI)
     this._initNet();
   }
 
@@ -1789,6 +1790,7 @@ class PvpBrain {
         if (actionMap[a]) target[i] = clamp(current[i] + (wasGood ? 0.08 : -0.05), 0, 1);
       });
       this.net.train([{ input: features, output: target }], { iterations: 3, errorThresh: 0.05 });
+      this._onlineTrainCount++;
     } catch {}
   }
 }
