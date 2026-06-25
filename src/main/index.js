@@ -141,7 +141,14 @@ function setupIpcHandlers() {
       return { ok: false, reason: err.message };
     }
 
-    // 3. КЛЮЧЕВОЕ: останавливаем все запущенные PvpController.
+    // 3. Шлём лог в UI всех ботов
+    if (botManager) {
+      for (const [botId] of (botManager.bots || [])) {
+        try { botManager._emitActionLog(botId, 'pvp', '🧠 Мозг сброшен! Нажмите Запуск PVP для нового обучения.'); } catch {}
+      }
+    }
+
+    // 4. КЛЮЧЕВОЕ: останавливаем все запущенные PvpController.
     //    Без этого: если PVP уже работал, isRunning()=true → startPvpTask делает ранний return
     //    → новый PvpBrain не создаётся → старый brain.ready=true → экран обучения не появляется.
     //    После остановки пользователь нажимает Start PVP → создаётся свежий PvpBrain с forceRetrain → обучение.
