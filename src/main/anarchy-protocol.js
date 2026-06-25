@@ -148,17 +148,9 @@ class AnarchyProtocol {
           this._addLog(`⚠️ Задача завершилась: ${err?.message || 'готово'}`);
         });
         await sleep(2000); // небольшая пауза между повторами
-      } else if (this.instance.aiBrain) {
-        // AI режим — даём 2 минуты, потом напоминаем
-        this.instance.aiBrain.respondToPlayer("AnarchyProtocol", this._task).catch(() => {});
-        await sleep(60000);
-        // Проверяем прогресс каждую минуту
-        const afterItems = bot.inventory?.items() || [];
-        if (afterItems.length >= this._maxInventorySlots) {
-          this._addLog(`📦 Инвентарь заполнен. Иду на базу!`);
-          return;
-        }
       } else {
+        // Задача не распознана — логируем и ждём (без Ollama)
+        this._addLog('Задача не распознана как скриптовая. Выберите задачу из пресетов.');
         await sleep(30000);
       }
     }
@@ -330,21 +322,33 @@ class AnarchyProtocol {
 
   _parseAnarchyTask(task) {
     const t = task.toLowerCase();
-    if (/руби|рубить|дерев|wood|log/.test(t)) {
+    if (/wood|log|дерев|руби|рубить/.test(t)) {
       const m = t.match(/(\d+)/);
       return { name: "gather_wood", args: { count: m ? parseInt(m[1]) : 32 } };
     }
-    if (/камень|cobble|stone/.test(t)) {
+    if (/stone|cobble|камень|камни/.test(t)) {
       const m = t.match(/(\d+)/);
       return { name: "gather_stone", args: { count: m ? parseInt(m[1]) : 64 } };
     }
-    if (/еда|охот|корова|свинья|курица|food|hunt/.test(t)) {
+    if (/еда|охот|корова|свинья|food|hunt|мясо/.test(t)) {
       return { name: "gather_food", args: {} };
     }
-    if (/исследу|explore|гуля/.test(t)) {
+    if (/explore|исследу|гуля/.test(t)) {
       return { name: "explore", args: {} };
     }
-    return null; // AI обработает
+    if (/пшениц|wheat/.test(t)) {
+      return { name: "farm_crops", args: { crop: "wheat_seeds", radius: 15, bonemeal: true } };
+    }
+    if (/морков|carrot/.test(t)) {
+      return { name: "farm_crops", args: { crop: "carrot", radius: 15, bonemeal: true } };
+    }
+    if (/картофел|potato/.test(t)) {
+      return { name: "farm_crops", args: { crop: "potato", radius: 15, bonemeal: true } };
+    }
+    if (/быстр|quick|боне|bone/.test(t)) {
+      return { name: "farm_quick", args: { crop: "wheat_seeds", bonemeal: true } };
+    }
+    return null;
   }
 
   // ── Утилиты ─────────────────────────────────────────────────────────
