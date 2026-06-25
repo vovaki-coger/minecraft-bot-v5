@@ -20,7 +20,17 @@ catch { log.warn("[PvpBrain] brain.js не установлен — эврист
 
 const path = require("path");
 const fs   = require("fs");
-const WEIGHTS_PATH = path.join(__dirname, "../../pvp-weights.json");
+// FIX: app.getPath('userData') resolves to a writable directory outside the asar archive.
+// __dirname inside a packaged asar is read-only — weights could never be saved/loaded.
+function _getWeightsPath() {
+  try {
+    const { app } = require("electron");
+    return path.join(app.getPath("userData"), "pvp-weights.json");
+  } catch {
+    return path.join(__dirname, "../../pvp-weights.json");
+  }
+}
+const WEIGHTS_PATH = _getWeightsPath();
 
 const SWORD_NAMES = ["wooden_sword","stone_sword","iron_sword","golden_sword","diamond_sword","netherite_sword","mace"];
 const AXE_NAMES   = ["wooden_axe","stone_axe","iron_axe","golden_axe","diamond_axe","netherite_axe"];
@@ -1791,6 +1801,10 @@ class PvpBrain {
       });
       this.net.train([{ input: features, output: target }], { iterations: 3, errorThresh: 0.05 });
       this._onlineTrainCount++;
+      // Каждые 50 онлайн-итераций — шлём запись в лог
+      if (this._onlineTrainCount % 50 === 0 && typeof this._onLogTrainCount === 'function') {
+        this._onLogTrainCount(this._onlineTrainCount);
+      }
     } catch {}
   }
 }
