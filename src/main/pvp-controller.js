@@ -61,6 +61,7 @@ class PvpController {
     this._running   = false;
     this._loopTimer = null;
     this._target    = null;
+    this._lastKnownTargetPos = null; // кэш последней валидной позиции цели
     this._teammates = new Set();
     this._attackCount   = 0;
     this._tickCount     = 0;
@@ -214,9 +215,12 @@ class PvpController {
 
       const hp   = bot.health ?? 20;
       const food = bot.food   ?? 20;
-      // Защита: если у цели нет позиции — сбрасываем и ждём следующего тика
-      if (!this._target?.position) { this._target = null; this._scheduleTick(150); return; }
-      const dist = bot.entity.position.distanceTo(this._target.position);
+      // Кэшируем позицию когда она есть, используем кэш когда null (~80-800мс после удара).
+      // НИКОГДА не обнуляем target из-за null position — иначе 600-800мс потери цели на каждый удар.
+      if (this._target?.position) this._lastKnownTargetPos = this._target.position;
+      const tgtPos = this._target?.position ?? this._lastKnownTargetPos;
+      if (!tgtPos) { this._target = null; this._scheduleTick(150); return; }
+      const dist = bot.entity.position.distanceTo(tgtPos);
 
       // Лог каждые 5 тиков
       if (this._tickCount % 5 === 0) {
@@ -447,7 +451,8 @@ class PvpController {
       }
 
       // Проверяем дистанцию снова после прыжка
-      if (this._target && bot.entity.position.distanceTo(this._target.position) > 3.8) {
+      const _checkPos = this._target?.position ?? this._lastKnownTargetPos;
+      if (this._target && _checkPos && bot.entity.position.distanceTo(_checkPos) > 3.8) {
         this._log('⚠️ Цель убежала во время прыжка — отменяем удар');
         return;
       }
@@ -729,7 +734,9 @@ class PvpController {
     if (!this._target || this._isDoingAction || this._isEating) return;
     const cfg = this.instance.config || {};
     if (cfg.useSplashPotions === false) return;
-    const dist = bot.entity.position.distanceTo(this._target.position);
+    const _dpPos = this._target?.position ?? this._lastKnownTargetPos;
+    if (!_dpPos) return;
+    const dist = bot.entity.position.distanceTo(_dpPos);
     if (dist > 6) return;
     const items = bot.inventory.items();
     const debuff = items.find(i => {
