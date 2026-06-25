@@ -277,6 +277,7 @@ class BotManager {
       // Включаем спринт — без него pathfinder не может нормально ходить
       movements.allowSprinting = true;
       movements.allowParkour = true;
+      movements.allow1by1towers = true; // Нужно для рубки дерева (карабкаться вверх). PvP переопределит в false.
       movements.canDig = false; // Не ломаем блоки в пути — иначе частицы и зависание
       movements.allow1by1towers = false;
       // Жидкость дорогая — бот не ходит по воде (анти-NoSlow флаг)
