@@ -274,8 +274,9 @@ class BotManager {
       }, spawnIdleMs);
 
       const movements = new Movements(bot);
-      // Не спринтим — спринт легко флагается анти-читом у нечеловечного бота
-      movements.allowSprinting = false;
+      // Включаем спринт — без него pathfinder не может нормально ходить
+      movements.allowSprinting = true;
+      movements.allowParkour = true;
       movements.canDig = true;
       movements.allow1by1towers = false;
       // Жидкость дорогая — бот не ходит по воде (анти-NoSlow флаг)
@@ -284,6 +285,12 @@ class BotManager {
       // Не прыгаем с больших высот — предотвращаем flight/elytra флаги
       try { movements.maxDropDown = 3; } catch {}
       bot.pathfinder.setMovements(movements);
+
+      // ── Knockback: при получении урона останавливаем pathfinder (позволяет физике отбросить бота) ──
+      bot.on('entityHurt', (entity) => {
+        if (entity !== bot.entity) return;
+        try { bot.pathfinder.stop(); } catch {}
+      });
 
       // ── AntiDetect v2: login packet masking + ground flag + velocity + lookAt ──
       AntiDetect.patchLoginPackets(bot);
