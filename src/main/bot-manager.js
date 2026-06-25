@@ -1276,13 +1276,19 @@ class BotManager {
     // Подключаем прогресс обучения нейросети к renderer
     const brain = instance._pvpController.brain;
     if (brain && !brain.ready) {
-      this.emit('bot:pvpBrainTraining', { botId, pct: 0, msg: 'Генерируем сценарии...' });
       brain._onProgress = (pct, msg) => {
         this.emit('bot:pvpBrainTraining', { botId, pct, msg });
       };
       brain._onReady = () => {
         this.emit('bot:pvpBrainReady', { botId });
       };
+      // ВАЖНО: первое событие отправляем через setImmediate, а НЕ сразу.
+      // Если отправить сейчас — IPC-ответ ещё не вернулся, setPvpActive(true) не вызван,
+      // overlay не откроется (нужно pvpActive && brainTraining оба = true).
+      // После setImmediate: IPC-ответ → setPvpActive(true) → событие → pvpActive=true → overlay.
+      setImmediate(() => {
+        this.emit('bot:pvpBrainTraining', { botId, pct: 1, msg: '🧠 Запускаем обучение нейросети...' });
+      });
     }
 
     return { pvpMode: true };
