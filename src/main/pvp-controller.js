@@ -199,7 +199,9 @@ class PvpController {
 
       // Нет цели — следуем за тимейтом, едим если надо
       if (!this._target) {
-        this._log('🔍 Цель не найдена — ждём врага в радиусе 24 блоков');
+        const _pK2 = Object.keys(bot.players || {});
+        const _pE2 = _pK2.filter(k => bot.players[k]?.entity).length;
+        this._log('[NO-TARGET] players=[' + (_pK2.join(',') || 'none') + '] withEntity=' + _pE2 + '/' + _pK2.length);
         const hp   = bot.health ?? 20;
         const food = bot.food   ?? 20;
         if (!this._isDoingAction && !this._isEating) {
@@ -234,13 +236,19 @@ class PvpController {
 
       // Сброс зависших действий (не еды — у еды свой флаг)
       if (this._isDoingAction && !this._isEating && Date.now() - this._actionStartedAt > 3000) {
+        const _sA = Math.round((Date.now()-this._actionStartedAt)/1000);
+        this._log('[STUCK] _isDoingAction timeout ' + _sA + 's window=' + !!bot.currentWindow);
         this._isDoingAction = false;
         this._forceAttack = 2;
+        try { if (bot.currentWindow) bot.closeWindow(bot.currentWindow); } catch {}
       }
-      // Еда слишком долго (>5 сек)
+      // Еда слишком долго (>3.5 сек)
       if (this._isEating && Date.now() - this._actionStartedAt > 3500) {
+        const _sE = Math.round((Date.now()-this._actionStartedAt)/1000);
+        this._log('[STUCK] _isEating timeout ' + _sE + 's window=' + !!bot.currentWindow);
         this._isEating = false;
         this._isDoingAction = false;
+        try { if (bot.currentWindow) bot.closeWindow(bot.currentWindow); } catch {}
       }
       if (this._isDoingAction || this._isEating) { this._scheduleTick(150); return; }
 
@@ -817,6 +825,13 @@ class PvpController {
     let closest = null, minDist = 80;
     const myPos = bot.entity.position;
     const botName = (bot.username || '').toLowerCase();
+  // DEBUG: log player/entity counts every 10 ticks in _findTarget
+  if (this._tickCount % 10 === 0) {
+    const _pK  = Object.keys(bot.players || {});
+    const _pWE = _pK.filter(k => bot.players[k]?.entity).length;
+    const _eC  = Object.keys(bot.entities || {}).length;
+    this._log('[SCAN] findTarget: players=' + _pK.length + '(ent=' + _pWE + ') entities=' + _eC);
+  }
 
     // ── ПРИОРИТЕТ 1: bot.players ──────────────────────────────────────────
     for (const [pKey, pInfo] of Object.entries(bot.players || {})) {
@@ -838,13 +853,28 @@ class PvpController {
       minDist = d; closest = e;
     }
 
-    // ── ПРИОРИТЕТ 2: bot.entities — только мобы ───────────────────────────
+    // FIX ПРИОРИТЕТ 2: bot.entities — мобы + игроки которых нет в bot.players
+    // pInfo.entity бывает null даже когда игрок физически виден (mineflayer timing race)
+    const foundInPlayers = new Set();
+    for (const [, pInfo] of Object.entries(bot.players || {})) {
+      if (pInfo?.entity) {
+        const u = (typeof pInfo.username === 'string' ? pInfo.username : '').toLowerCase();
+        if (u) foundInPlayers.add(u);
+      }
+    }
     for (const e of Object.values(bot.entities || {})) {
       if (!e?.position || e === bot.entity) continue;
       const hasUsername = typeof e.username === 'string' && e.username.length > 0;
-      if (hasUsername) continue; // игроков взяли из bot.players выше
-      const isMob = e.type === 'mob' || e.type === 'hostile';
-      if (!isMob || e.isValid === false) continue;
+      if (hasUsername) {
+        // FIX: берём игрока из entities только если НЕ нашли его в bot.players
+        const uname = e.username.toLowerCase();
+        if (uname === botName || this._teammates.has(uname)) continue;
+        if (foundInPlayers.has(uname)) continue;
+        this._log('[FIX] player in entities not in players: ' + e.username);
+      } else {
+        const isMob = e.type === 'mob' || e.type === 'hostile';
+        if (!isMob || e.isValid === false) continue;
+      }
       let d;
       try { d = myPos.distanceTo(e.position); } catch { continue; }
       if (isNaN(d) || d >= minDist) continue;
