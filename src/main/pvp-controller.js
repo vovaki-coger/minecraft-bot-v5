@@ -862,6 +862,12 @@ class PvpController {
             closest = this._stickyTarget;
             this._log(`🕯 Sticky (${Math.round(stickyAge)}мс): ${this._stickyTarget.username || '?'}`);
           }
+        } else if (stickyAge < 500) {
+          // position временно null (~80мс после bot.attack) — и в bot.players тот же объект.
+          // Ставим closest=entity без позиции: _tick имеет null-guard и просто подождёт 150мс.
+          // Без этого бот теряет цель на каждом ударе и останавливается.
+          closest = this._stickyTarget;
+          this._log(`🕯 Sticky pos=null (${Math.round(stickyAge)}мс) — ждём позицию`);
         }
       }
     }
