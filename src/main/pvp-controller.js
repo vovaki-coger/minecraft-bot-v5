@@ -58,6 +58,10 @@ class PvpController {
     this.instance   = instance;
     this.emit       = emit;
     this.brain      = new PvpBrain();
+    // FIX: callback для логирования кол-ва онлайн-обучений в лог вкладки
+    this.brain._onLogTrainCount = (count) => {
+      this._log('🧠 Онлайн-обучений: ' + count);
+    };
     this._running   = false;
     this._loopTimer = null;
     this._target    = null;
@@ -119,12 +123,12 @@ class PvpController {
       bot.pathfinder.setMovements(m);
     } catch {}
 
-    // FIX: урон НЕ прерывает еду (_isEating), только другие действия
+    // FIX: используем 'health' (не 'entityHurt') — 'health' срабатывает когда меняется
+    // HP самого бота. 'entityHurt' срабатывает для ДРУГИХ существ, не для бота.
     this._onHurt = () => {
       const currentHP = bot.health ?? 20;
       if (currentHP < this._lastHP - 0.5) {
-        // FIX: если бот в воздухе (прыжок крита) и получил урон — немедленно сбрасываем jump
-        // Иначе бот зависает в воздухе после нокбэка
+        // Получили урон — сбрасываем jump если висим в воздухе (нокбэк после крита)
         if (!bot.entity?.onGround) {
           try { bot.setControlState('jump', false); } catch {}
           log.debug("[PvpController] 🔽 Сброс jump — получили урон в воздухе");
@@ -144,7 +148,7 @@ class PvpController {
       }
       this._lastHP = currentHP;
     };
-    try { bot.on("entityHurt", this._onHurt); } catch {}
+    try { bot.on("health", this._onHurt); } catch {}
 
     this.emit("bot:pvpStarted", { botId: this.instance.id });
     this._addChat("⚔️ PVP v5.1 [LOS+крит+спринт]");
@@ -162,7 +166,7 @@ class PvpController {
     if (this._loopTimer) { clearTimeout(this._loopTimer); this._loopTimer = null; }
     const { bot } = this.instance;
     if (bot) {
-      try { bot.off("entityHurt", this._onHurt); } catch {}
+      try { bot.off("health", this._onHurt); } catch {}
       try { bot.pathfinder?.stop(); } catch {}
       try { bot.setControlState?.("forward", false); } catch {}
       try { bot.setControlState?.("sprint",  false); } catch {}
