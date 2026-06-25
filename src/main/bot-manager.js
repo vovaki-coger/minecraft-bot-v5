@@ -1271,10 +1271,17 @@ class BotManager {
     instance._pvpController = new PvpController(instance, this.emit);
     instance._pvpController.start(opts);
     this.emit('bot:pvpToggled', { botId, pvpMode: true });
-    this._emitActionLog(botId, 'pvp', '▶ PVP режим запущен — крит+спринт');
+
+    // Показываем кол-во накопленных онлайн-обучений
+    const brain = instance._pvpController.brain;
+    const expCount = brain?._onlineTrainCount ?? 0;
+    if (brain?.ready) {
+      this._emitActionLog(botId, 'pvp', `▶ PVP запущен | 🧠 нейросеть готова | онлайн-итераций: ${expCount}`);
+    } else {
+      this._emitActionLog(botId, 'pvp', `▶ PVP запущен | 🧠 нейросеть обучается...`);
+    }
 
     // Подключаем прогресс обучения нейросети к renderer
-    const brain = instance._pvpController.brain;
     if (brain && !brain.ready) {
       brain._onProgress = (pct, msg) => {
         this.emit('bot:pvpBrainTraining', { botId, pct, msg });
