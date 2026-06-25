@@ -8,7 +8,7 @@ const log = require("electron-log");
 class TaskManager {
   constructor(botInstance, emit) {
     this.instance = botInstance;
-    this.emit = emit;
+    this.emit = emit || (() => {});
     this.currentTask = null;
     this._running = false;
     this._followInterval = null;
@@ -328,23 +328,37 @@ class TaskManager {
    * 5. Когда посев вырос — собирает (dig)
    */
   async _taskFarmCrops(opts = {}) {
-    const { crop = "wheat_seeds", radius = 10, bonemeal = true } = opts;
+    const { crop = "wheat_seeds", radius = 10, bonemeal = true, depositChest = true } = opts;
     this._log("Начинаю фарм " + crop + " в радиусе " + radius);
 
     // Максимальный возраст для культуры
     const maxAgeMap = {
       wheat_seeds: 7, carrot: 7, potato: 7, beetroot_seeds: 3,
       melon_seeds: 7, pumpkin_seeds: 7, nether_wart: 3,
+      sweet_berries: 3,
     };
     const maxAge = maxAgeMap[crop] ?? 7;
+
+    // Типы культур
+    const FRUIT_CROPS    = new Set(["melon_seeds","pumpkin_seeds"]);
+    const VERTICAL_CROPS = new Set(["sugar_cane","bamboo","cactus"]);
+    const MUSHROOM_CROPS = new Set(["red_mushroom","brown_mushroom"]);
+    const CHORUS_CROPS   = new Set(["chorus_flower"]);
+
+    const isFruit    = FRUIT_CROPS.has(crop);
+    const isVertical = VERTICAL_CROPS.has(crop);
+    const isMushroom = MUSHROOM_CROPS.has(crop);
 
     // Реальное имя посева в мире (растение)
     const growthNameMap = {
       wheat_seeds: "wheat", carrot: "carrots", potato: "potatoes",
       beetroot_seeds: "beetroots", melon_seeds: "melon_stem",
       pumpkin_seeds: "pumpkin_stem", nether_wart: "nether_wart",
+      sugar_cane: "sugar_cane", bamboo: "bamboo", cactus: "cactus",
+      sweet_berries: "sweet_berry_bush", red_mushroom: "red_mushroom",
+      brown_mushroom: "brown_mushroom", chorus_flower: "chorus_flower",
     };
-    const growthName = growthNameMap[crop] || "wheat";
+    const growthName = growthNameMap[crop] || crop;
 
     const hoe       = this.bot.inventory.items().find(i => i.name.includes("hoe"));
     const seedItem  = this.bot.inventory.items().find(i => i.name === crop);
@@ -361,17 +375,83 @@ class TaskManager {
 
         const tp = pos.offset(dx, 0, dz);
 
-        // Проверяем нужен ли сбор урожая
+        // ── Вертикальные культуры (тростник, бамбук, кактус) ──────────────
+        if (isVertical) {
+          const above = this.bot.blockAt(tp.offset(0, 1, 0));
+          if (above && above.name === growthName) {
+            // Ищем верхний блок колонны (высота >= 2 → срубаем верхние оставляя нижний)
+            let height = 0;
+            while (this.bot.blockAt(tp.offset(0, height + 1, 0))?.name === growthName) height++;
+            if (height >= 1) {
+              // Ломаем блок на высоте 2 снизу — верхние упадут
+              await this._gotoNearest(tp, 3);
+              for (let h = height; h >= 2 && this._running; h--) {
+                const b = this.bot.blockAt(tp.offset(0, h, 0));
+                if (b && b.name === growthName) { await this.bot.dig(b).catch(() => {}); await this._sleep(50); }
+              }
+              harvested++;
+            }
+          } else {
+            // Нет ростка — сажаем
+            const ground = this.bot.blockAt(tp);
+            if (ground && ["dirt","grass_block","sand","gravel","mud","mycelium","podzol"].includes(ground.name)) {
+              const seedItem = this.bot.inventory.items().find(i => i.name === crop);
+              if (seedItem) {
+                await this._gotoNearest(tp, 3);
+                await this.bot.equip(seedItem, "hand").catch(() => {});
+                await this.bot.activateBlock(ground).catch(() => {});
+                await this._sleep(80);
+                planted++;
+              }
+            }
+          }
+          continue;
+        }
+
+        // ── Плодовые культуры (дыня, тыква) — собираем ПЛОД, не стебель ──
+        if (isFruit) {
+          const stemBlock = this.bot.blockAt(tp.offset(0, 1, 0));
+          if (stemBlock && stemBlock.name === growthName) {
+            // Ищем плод рядом с стеблем (4 стороны)
+            const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+            for (const [dx2, dz2] of DIRS) {
+              const fruitPos = tp.offset(dx2, 1, dz2);
+              const fruitBlock = this.bot.blockAt(fruitPos);
+              const isMelon = fruitBlock?.name === "melon" || fruitBlock?.name === "pumpkin";
+              if (isMelon) {
+                await this._gotoNearest(fruitPos, 3);
+                await this.bot.dig(fruitBlock).catch(() => {});
+                await this._sleep(60);
+                harvested++;
+                break;
+              }
+            }
+            // Костная мука на стебель
+            const stemAge = stemBlock.getProperties?.()?.age ?? stemBlock.metadata ?? 0;
+            if (stemAge < maxAge && bonemeal) {
+              const freshBone = this.bot.inventory.items().find(i => i.name === "bone_meal");
+              if (freshBone) {
+                await this._gotoNearest(tp, 3);
+                await this.bot.equip(freshBone, "hand").catch(() => {});
+                for (let b = 0; b < 4 && this._running; b++) {
+                  await this.bot.activateBlock(stemBlock).catch(() => {});
+                  await this._sleep(40);
+                }
+              }
+            }
+            continue;
+          }
+        }
+
+        // ── Стандартные культуры ──────────────────────────────────────────
         const cropBlock = this.bot.blockAt(tp.offset(0, 1, 0));
         if (cropBlock && cropBlock.name === growthName) {
           const age = cropBlock.getProperties?.()?.age ?? cropBlock.metadata ?? 0;
           if (age >= maxAge) {
-            // Собрать
             await this._gotoNearest(tp, 3);
             if (!this._running) break;
             await this.bot.dig(cropBlock).catch(() => {});
             await this._sleep(60);
-            // Пересадить
             const freshSeed = this.bot.inventory.items().find(i => i.name === crop);
             if (freshSeed) {
               const farmBlock = this.bot.blockAt(tp);
@@ -384,8 +464,6 @@ class TaskManager {
             harvested++;
             continue;
           }
-
-          // Костная мука на незрелое
           if (bonemeal && boneItem) {
             const freshBone = this.bot.inventory.items().find(i => i.name === "bone_meal");
             if (freshBone) {
@@ -445,6 +523,7 @@ class TaskManager {
       }
     }
 
+    if (depositChest) await this._depositToChest();
     this._log(`Фарм завершён: посадил ${planted}, собрал ${harvested}`);
   }
 
@@ -550,7 +629,7 @@ class TaskManager {
    * 5. Повтор
    */
   async _taskFarmTreesFull(opts = {}) {
-    const { sapling = "oak_sapling", spacing = 3, radius = 20, bonemeal = true } = opts;
+    const { sapling = "oak_sapling", spacing = 3, radius = 20, bonemeal = true, depositChest = true } = opts;
     this._log(`Фарм деревьев: ${sapling}, интервал ${spacing}, радиус ${radius}`);
 
     const pos = this.bot.entity.position.clone().floor();
@@ -625,6 +704,7 @@ class TaskManager {
       if (planted % 5 === 0) this._log(`Деревья: посажено ${planted}, срублено ${chopped}`);
     }
 
+    if (depositChest) await this._depositToChest();
     this._log(`Фарм деревьев завершён: посажено ${planted}, срублено ${chopped}`);
   }
 
@@ -847,6 +927,48 @@ class TaskManager {
     return diff < (fovDegrees / 2) * (Math.PI / 180);
   }
 
+  // ── Сдача в сундук ───────────────────────────────────────────────────────
+  async _depositToChest() {
+    try {
+      const Vec3 = require('vec3');
+      const KEEP = new Set(["wooden_sword","stone_sword","iron_sword","golden_sword","diamond_sword","netherite_sword",
+        "wooden_axe","stone_axe","iron_axe","golden_axe","diamond_axe","netherite_axe",
+        "wooden_pickaxe","stone_pickaxe","iron_pickaxe","golden_pickaxe","diamond_pickaxe","netherite_pickaxe",
+        "wooden_shovel","stone_shovel","iron_shovel","golden_shovel","diamond_shovel","netherite_shovel",
+        "wooden_hoe","stone_hoe","iron_hoe","golden_hoe","diamond_hoe","netherite_hoe",
+        "golden_apple","enchanted_golden_apple","totem_of_undying","bone_meal",
+        "oak_sapling","birch_sapling","spruce_sapling","jungle_sapling","acacia_sapling","dark_oak_sapling",
+        "wheat_seeds","carrot","potato","beetroot_seeds","melon_seeds","pumpkin_seeds","nether_wart",
+        "sugar_cane","bamboo","cactus","sweet_berries","red_mushroom","brown_mushroom","chorus_flower",
+        "bucket","water_bucket","flint_and_steel","ender_pearl","fire_charge","shield",
+      ]);
+      this._log("📦 Ищу ближайший сундук...");
+      const chest = this.bot.findBlock({
+        matching: b => b.name === "chest" || b.name === "trapped_chest" || b.name === "barrel",
+        maxDistance: 40,
+      });
+      if (!chest) { this._log("📦 Сундук не найден"); return; }
+      await this._gotoNearest(chest.position, 3);
+      const chestContainer = await this.bot.openContainer(chest).catch(() => null);
+      if (!chestContainer) { this._log("📦 Не удалось открыть сундук"); return; }
+      await this._sleep(300);
+      const items = this.bot.inventory.items();
+      let deposited = 0;
+      for (const item of items) {
+        if (KEEP.has(item.name)) continue;
+        try {
+          await chestContainer.deposit(item.type, null, item.count);
+          deposited += item.count;
+          await this._sleep(60);
+        } catch {}
+      }
+      chestContainer.close();
+      this._log(`📦 Сдал в сундук: ${deposited} предметов`);
+    } catch (err) {
+      this._log("📦 Ошибка сдачи: " + err.message);
+    }
+  }
+
   // ── Вспомогательные ─────────────────────────────────────────────────────
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -891,13 +1013,16 @@ class TaskManager {
             await this.bot.dig(b2);
             dug++;
             if (dug % 16 === 0) {
-              this._log(`⛏ Раскопка: ${dug}/${total - skipped} блоков`);
+              const msg = `⛏ Раскопка: ${dug}/${total} блоков (слой Y=${y})`;
+              this._log(msg);
+              this.emit("bot:excavateProgress", { botId: this.instance.id, dug, total, msg });
             }
           } catch { skipped++; }
         }
       }
     }
     this._chat(`✅ Раскопка завершена! Выкопано: ${dug}, пропущено: ${skipped}`);
+    this.emit("bot:excavateDone", { botId: this.instance.id, dug, skipped });
   }
 
   async _gotoNearest(pos, range = 3) {
