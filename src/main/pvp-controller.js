@@ -202,10 +202,7 @@ class PvpController {
         this._log('🔍 Цель не найдена — ждём врага в радиусе 24 блоков');
         const hp   = bot.health ?? 20;
         const food = bot.food   ?? 20;
-        // Skip eating while sticky target is still fresh (entity temporarily gone)
-        // FIX: 6000мс совпадает с увеличенным sticky window в _findTarget
-        const stickyFresh = this._stickyTargetTs && (Date.now() - this._stickyTargetTs < 6000);
-        if (!stickyFresh && !this._isDoingAction && !this._isEating) {
+        if (!this._isDoingAction && !this._isEating) {
           const eatMode = this._shouldEatNoCombat(hp, food);
           if (eatMode) {
             await this._doEatSmart(bot, eatMode);
@@ -213,7 +210,7 @@ class PvpController {
             await this._followTeammate(bot);
           }
         }
-        this._scheduleTick(stickyFresh ? 150 : 500);
+        this._scheduleTick(500);
         return;
       }
 
@@ -221,7 +218,11 @@ class PvpController {
       const food = bot.food   ?? 20;
       // Кэшируем позицию когда она есть, используем кэш когда null (~80-800мс после удара).
       // НИКОГДА не обнуляем target из-за null position — иначе 600-800мс потери цели на каждый удар.
-      if (this._target?.position) this._lastKnownTargetPos = this._target.position;
+      // FIX: клонируем позицию — иначе ссылка мутируется Mineflayer'ом
+      if (this._target?.position) {
+        try { this._lastKnownTargetPos = this._target.position.clone(); }
+        catch { this._lastKnownTargetPos = this._target.position; }
+      }
       const tgtPos = this._target?.position ?? this._lastKnownTargetPos;
       if (!tgtPos) { this._target = null; this._scheduleTick(150); return; }
       const dist = bot.entity.position.distanceTo(tgtPos);
@@ -294,10 +295,12 @@ class PvpController {
       return;
     }
     const target = this._target;
-    if (!target?.position || !bot.entity) return;
+    // FIX: используем lastKnownTargetPos если position временно null (после удара)
+    const rawTpos = target?.position ?? this._lastKnownTargetPos;
+    if (!rawTpos || !bot.entity) return;
 
     const pos  = bot.entity.position;
-    const tpos = target.position;
+    const tpos = rawTpos; // FIX: может быть lastKnownTargetPos если entity.position==null
 
     const dx     = tpos.x - pos.x;
     const dz     = tpos.z - pos.z;
@@ -848,40 +851,63 @@ class PvpController {
       minDist = d; closest = e;
     }
 
-    // ── Sticky: держим цель 6 сек по ИМЕНИ (не по ссылке на объект!) ──────────
-    // FIX: после bot.attack() Mineflayer пересоздаёт entity-объект игрока из-за
-    // knockback-пакетов. Старая ссылка (this._stickyTarget) становится мёртвой —
-    // position всегда null. Решение: ищем по this._lastTargetName каждый тик.
+    // ── Sticky: держим цель 8 сек по ИМЕНИ ─────────────────────────────────────
+    // ПРОБЛЕМА: после bot.attack() Mineflayer временно убирает entity из bot.players[name]
+    // (entity = undefined, не null). Старый sticky-код падал в else if (stickyAge < 2000)
+    // и терял цель через 2 сек. Новый код:
+    //   1. Ищет свежую ссылку в bot.players (case-insensitive)
+    //   2. Если не нашёл в players — сканирует bot.entities напрямую по username
+    //   3. Если нашёл entity без position — возвращает его (_tick использует lastKnownTargetPos)
+    //   4. Если совсем ничего — держит _stickyTarget до 8 сек (не 2!)
     if (!closest && this._lastTargetName) {
       const stickyAge = Date.now() - (this._stickyTargetTs || 0);
       if (stickyAge < 8000) {
-        // Всегда перечитываем из bot.players — получаем свежую ссылку
+        // Шаг 1: ищем в bot.players (case-insensitive по username)
+        let freshEntity = null;
         const players = bot.players || {};
-        const pe = players[this._lastTargetName] ||
-                   Object.values(players).find(p =>
-                     typeof p.username === 'string' &&
-                     p.username.toLowerCase() === this._lastTargetName);
+        for (const [pKey, pInfo] of Object.entries(players)) {
+          const uname = (typeof pInfo?.username === 'string' ? pInfo.username : pKey).toLowerCase();
+          if (uname !== this._lastTargetName) continue;
+          if (pInfo?.entity) { freshEntity = pInfo.entity; break; }
+        }
 
-        if (pe?.entity) {
-          this._stickyTarget = pe.entity; // обновляем ссылку на актуальный объект
-          if (pe.entity.position) {
+        // Шаг 2: не нашли в players — сканируем bot.entities напрямую по username
+        // КЛЮЧЕВОЙ ФИX: после knockback entity может исчезнуть из bot.players,
+        // но остаться в bot.entities с валидной позицией!
+        if (!freshEntity) {
+          for (const e of Object.values(bot.entities || {})) {
+            if (!e || e === bot.entity) continue;
+            if (typeof e.username !== 'string') continue;
+            if (e.username.toLowerCase() !== this._lastTargetName) continue;
+            freshEntity = e;
+            break;
+          }
+        }
+
+        if (freshEntity) {
+          this._stickyTarget = freshEntity;
+          if (freshEntity.position) {
             let d;
-            try { d = myPos.distanceTo(pe.entity.position); } catch {}
-            if (!isNaN(d) && d < 30) {
-              closest = pe.entity;
-              this._log('🕯 Sticky[name] (' + Math.round(stickyAge) + 'мс): ' + (pe.username || this._lastTargetName));
+            try { d = myPos.distanceTo(freshEntity.position); } catch {}
+            if (!isNaN(d) && d < 40) {
+              closest = freshEntity;
+              if (stickyAge > 200) this._log('🕯 Sticky[recover] ' + Math.round(stickyAge) + 'мс → ' + this._lastTargetName);
             }
           } else {
-            // Entity есть в bot.players, но position временно null (~80-500мс после удара)
-            // Передаём entity в _tick — там есть null-guard и используется lastKnownTargetPos
-            closest = pe.entity;
-            this._log('🕯 Sticky pos=null (' + Math.round(stickyAge) + 'мс) — ждём позицию');
+            // Entity найден но position==null — передаём в _tick, там lastKnownTargetPos
+            closest = freshEntity;
+            this._log('🕯 Sticky[pos=null] ' + Math.round(stickyAge) + 'мс — ждём позицию');
           }
-        } else if (this._stickyTarget && stickyAge < 2000) {
-          // Игрок временно пропал из bot.players (< 2 сек) — используем старый объект
+        } else if (this._stickyTarget) {
+          // Нигде не нашли entity — используем стale-ссылку (8 сек, не 2!)
           closest = this._stickyTarget;
-          this._log('🕯 Sticky entity gone (' + Math.round(stickyAge) + 'мс) — кэш');
+          this._log('🕯 Sticky[stale] ' + Math.round(stickyAge) + 'мс — ' + this._lastTargetName);
         }
+      } else {
+        // Sticky истёк (8 сек) — сбрасываем
+        this._log('🕯 Sticky истёк (' + Math.round(stickyAge/1000) + 'с) — цель сброшена');
+        this._lastTargetName = null;
+        this._stickyTarget = null;
       }
     }
 
