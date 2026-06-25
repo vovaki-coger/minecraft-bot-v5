@@ -134,6 +134,7 @@ class TaskManager {
         new goals.GoalBlock(block.position.x, block.position.y, block.position.z)
       ).catch(() => {});
       if (!this._running) break;
+      await this.bot.lookAt(block.position.offset(0.5,0.5,0.5),true).catch(()=>{});
       await this.bot.dig(block).catch(() => {});
       collected++;
       if (collected % 5 === 0) this._log("Собрано " + collected + "/" + count + " бревён");
@@ -153,6 +154,7 @@ class TaskManager {
         new goals.GoalBlock(block.position.x, block.position.y, block.position.z)
       ).catch(() => {});
       if (!this._running) break;
+      await this.bot.lookAt(block.position.offset(0.5,0.5,0.5),true).catch(()=>{});
       await this.bot.dig(block).catch(() => {});
       collected++;
     }
@@ -387,7 +389,7 @@ class TaskManager {
               await this._gotoNearest(tp, 3);
               for (let h = height; h >= 2 && this._running; h--) {
                 const b = this.bot.blockAt(tp.offset(0, h, 0));
-                if (b && b.name === growthName) { await this.bot.dig(b).catch(() => {}); await this._sleep(50); }
+                if (b && b.name === growthName) { await this.bot.lookAt(b.position.offset(0.5,0.5,0.5),true).catch(()=>{}); await this.bot.dig(b).catch(() => {}); await this._sleep(50); }
               }
               harvested++;
             }
@@ -420,6 +422,7 @@ class TaskManager {
               const isMelon = fruitBlock?.name === "melon" || fruitBlock?.name === "pumpkin";
               if (isMelon) {
                 await this._gotoNearest(fruitPos, 3);
+                await this.bot.lookAt(fruitBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
                 await this.bot.dig(fruitBlock).catch(() => {});
                 await this._sleep(60);
                 harvested++;
@@ -450,6 +453,7 @@ class TaskManager {
           if (age >= maxAge) {
             await this._gotoNearest(tp, 3);
             if (!this._running) break;
+            await this.bot.lookAt(cropBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
             await this.bot.dig(cropBlock).catch(() => {});
             await this._sleep(60);
             const freshSeed = this.bot.inventory.items().find(i => i.name === crop);
@@ -572,6 +576,7 @@ class TaskManager {
             const age = above.getProperties?.()?.age ?? above.metadata ?? 0;
             if (age >= maxAge) {
               // Ломаем
+              await this.bot.lookAt(above.position.offset(0.5,0.5,0.5),true).catch(()=>{});
               await this.bot.dig(above).catch(() => {});
               await this._sleep(35 + Math.random() * 10);
               // Сразу сажаем снова
@@ -660,6 +665,7 @@ class TaskManager {
         if (!logBlock) { treesFound = false; break; }
         await this._gotoNearest(logBlock.position, 3);
         if (!this._running) break;
+        await this.bot.lookAt(logBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
         await this.bot.dig(logBlock).catch(() => {});
         await this._sleep(80);
         chopped++;
@@ -1010,6 +1016,7 @@ class TaskManager {
           if (!b2 || SKIP.has(b2.name) || !b2.diggable) { skipped++; continue; }
 
           try {
+            await this.bot.lookAt(b2.position.offset(0.5,0.5,0.5),true).catch(()=>{});
             await this.bot.dig(b2);
             dug++;
             if (dug % 16 === 0) {
