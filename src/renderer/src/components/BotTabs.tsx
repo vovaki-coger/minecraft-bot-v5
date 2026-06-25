@@ -7,13 +7,14 @@ export default function BotTabs() {
   const [showCreate, setShowCreate] = useState(false);
 
   const tabs = [
-    { id: "bots",        label: "Боты",         color: "#7ecc49" },
-    { id: "farm",        label: "🌾 Ферма",      color: "#7ecc49" },
-    { id: "pvp",         label: "⚔️ PVP",        color: "#e74c3c" },
-    { id: "models",      label: "Модели ИИ",     color: "#7ecc49" },
+    { id: "bots",        label: "Боты",          color: "#7ecc49" },
+    { id: "farm",        label: "🌾 Ферма",       color: "#2ecc71" },
+    { id: "pvp",         label: "⚔️ PVP",         color: "#e74c3c" },
     { id: "anarchy",     label: "🏴‍☠️ Анархия",  color: "#e74c3c" },
-    { id: "coordinator", label: "Координатор",   color: "#7ecc49" },
-    { id: "settings",    label: "Настройки",     color: "#7ecc49" },
+    { id: "miner",       label: "⛏ Шахтёр",      color: "#e67e22" },
+    { id: "models",      label: "Модели ИИ",      color: "#9b59b6" },
+    { id: "coordinator", label: "Координатор",    color: "#7ecc49" },
+    { id: "settings",    label: "Настройки",      color: "#7ecc49" },
   ] as const;
 
   return (
@@ -30,9 +31,7 @@ export default function BotTabs() {
             className="px-4 py-1.5 text-xs font-mono whitespace-nowrap transition-colors"
             style={{
               color: isActive ? tab.color : "#444",
-              borderBottom: isActive
-                ? `2px solid ${tab.color}`
-                : "2px solid transparent",
+              borderBottom: isActive ? `2px solid ${tab.color}` : "2px solid transparent",
               background: "none",
               cursor: "pointer",
               textShadow: isActive ? `0 0 8px ${tab.color}80` : "none",
@@ -59,20 +58,13 @@ export default function BotTabs() {
                   color: selectedBotId === bot.id ? "#7ecc49" : "#555",
                   border: `1px solid ${selectedBotId === bot.id ? "rgba(126,204,73,0.4)" : "transparent"}`,
                   cursor: "pointer",
-                  boxShadow: selectedBotId === bot.id ? "0 0 8px rgba(126,204,73,0.1)" : "none",
                   transition: "all 0.15s",
                 }}
               >
-                <span
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{
-                    background:
-                      bot.status === "online" ? "#7ecc49"
-                      : bot.status === "connecting" ? "#f39c12"
-                      : "#333",
-                    boxShadow: bot.status === "online" ? "0 0 6px rgba(126,204,73,0.6)" : "none",
-                  }}
-                />
+                <span className="w-1.5 h-1.5 rounded-full" style={{
+                  background: bot.status === "online" ? "#7ecc49" : bot.status === "connecting" ? "#f39c12" : "#333",
+                  boxShadow: bot.status === "online" ? "0 0 6px rgba(126,204,73,0.6)" : "none",
+                }} />
                 {bot.config.nick}
               </button>
             ))}
