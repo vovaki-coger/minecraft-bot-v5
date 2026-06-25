@@ -27,6 +27,43 @@ const FOOD_PRIORITY = [
 ];
 
 function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
+
+// FIX: mineflayer potions named "splash_potion", effect only in NBT not name
+// Reads Potion NBT tag OR legacy damage-value encoding
+function getPotionEffect(item) {
+  try {
+    const potionTag = item.nbt?.value?.Potion?.value || '';
+    if (potionTag) return potionTag.replace('minecraft:', '').toLowerCase();
+    const effects = item.nbt?.value?.CustomPotionEffects?.value?.value;
+    if (effects?.length) {
+      const id = effects[0]?.Id?.value;
+      const effectNames = {1:'speed',2:'slowness',3:'haste',4:'mining_fatigue',5:'strength',
+        6:'instant_health',7:'instant_damage',8:'jump_boost',9:'nausea',10:'regeneration',
+        11:'resistance',12:'fire_resistance',13:'water_breathing',14:'invisibility',
+        15:'blindness',16:'night_vision',17:'hunger',18:'weakness',19:'poison',20:'wither',
+        21:'health_boost',22:'absorption',23:'saturation'};
+      return (effectNames[id] || String(id)).toLowerCase();
+    }
+    // Legacy 1.8: damage value lower 4 bits = effect type
+    const dmg = item.metadata || 0;
+    const legacy = {1:'speed',2:'slowness',3:'haste',4:'mining_fatigue',5:'strength',
+      6:'instant_health',7:'instant_damage',8:'jump_boost',10:'regeneration',
+      11:'resistance',12:'fire_resistance',18:'weakness',19:'poison'};
+    return (legacy[dmg & 0xF] || '').toLowerCase();
+  } catch {}
+  return '';
+}
+
+function isPotionOfType(item, keywords) {
+  const name = item.name.toLowerCase();
+  // Обычный поиск по имени (legacy/modded names like "strength_potion")
+  if (keywords.some(k => name.includes(k))) return true;
+  // NBT-поиск для ванильных splash/drinkable potions
+  const effect = getPotionEffect(item);
+  return effect ? keywords.some(k => effect.includes(k)) : false;
+}
+
+
 function sleep(ms)    { return new Promise(r => setTimeout(r, ms)); }
 function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
 
@@ -242,8 +279,8 @@ class PvpController {
         this._forceAttack = 2;
         try { if (bot.currentWindow) bot.closeWindow(bot.currentWindow); } catch {}
       }
-      // Еда слишком долго (>3.5 сек)
-      if (this._isEating && Date.now() - this._actionStartedAt > 3500) {
+      // Еда слишком долго (>10 сек — нужно время на еду+гапл = ~4с)
+      if (this._isEating && Date.now() - this._actionStartedAt > 10000) {
         const _sE = Math.round((Date.now()-this._actionStartedAt)/1000);
         this._log('[STUCK] _isEating timeout ' + _sE + 's window=' + !!bot.currentWindow);
         this._isEating = false;
@@ -264,8 +301,7 @@ class PvpController {
       if (eatMode && this._forceAttack === 0 && dist > 6) {
         this._log(`🍗 Едим: HP=${hp.toFixed(1)}, режим=${eatMode}, dist=${dist.toFixed(1)}`);
         await this._doEatSmart(bot, eatMode);
-        // FIX: форсируем атаку после еды — иначе следующий тик снова съест!
-        this._forceAttack = 5;
+        // forceAttack уже установлен в _doEatSmart.finally (20 тиков = 1.6с атаки)
         this._scheduleTick(350);
         return;
       }
@@ -434,8 +470,8 @@ class PvpController {
       while (bot.entity.onGround && waited < 350) { await sleep(20); waited += 20; }
       try { bot.setControlState('jump', false); } catch {}
 
-      // Ждём пик прыжка (~130мс от отрыва)
-      await sleep(130 + rand(0, 20));
+      // Ждём пик прыжка (~90мс от отрыва) и начало падения — атакуем ПАДАЯ (crits требуют onGround=false)
+      await sleep(90 + rand(0, 20));
 
       // FIX: прицел на ТЕЛО цели (y+1.0 = центр тела), НЕ на голову и не в небо
       // Во время прыжка бот выше → pitch автоматически смотрит ВНИЗ на тело
@@ -456,17 +492,7 @@ class PvpController {
       }
       await sleep(20);
 
-      // FIX: защита от зависания — если всё ещё в воздухе, ждём приземления (макс 400мс)
-      let airWait = 0;
-      while (!bot.entity.onGround && airWait < 400) { await sleep(20); airWait += 20; }
-      if (!bot.entity.onGround) {
-        // Не приземлились — принудительно сбрасываем прыжок и пропускаем крит
-        try { bot.setControlState('jump', false); } catch {}
-        this._log('⚠️ Завис в воздухе — пропускаем крит, ждём земли');
-        return;
-      }
-
-      // Проверяем дистанцию снова после прыжка
+      // Проверяем дистанцию снова после прыжка — АТАКУЕМ ПОКА В ВОЗДУХЕ (crits требуют onGround=false)
       const _checkPos = this._target?.position ?? this._lastKnownTargetPos;
       if (this._target && _checkPos && bot.entity.position.distanceTo(_checkPos) > 3.8) {
         this._log('⚠️ Цель убежала во время прыжка — отменяем удар');
@@ -525,43 +551,50 @@ class PvpController {
 
   async _doEatSmart(bot, mode) {
     this._isDoingAction = true;
-    this._isEating = true;   // FIX: отдельный флаг
+    this._isEating = true;
     this._actionStartedAt = Date.now();
+    let ateAnything = false; // FIX: трекаем съел ли что-нибудь
     try {
       try { bot.setControlState("forward", false); bot.setControlState("sprint", false); } catch {}
       if (!this._target) {
-        // Вне боя — можем отойти назад
         try { bot.setControlState("back", true); } catch {}
       }
       await sleep(60 + rand(0, 40));
 
       if (mode === "gapple") {
-        await this._eatBestGapple(bot);
+        ateAnything = await this._eatBestGapple(bot);
       } else if (mode === "food_then_gapple") {
-        // Схема юзера: сначала обычная еда (мясо/морковь/etc), ПОТОМ гапл
         const regularFood = this._selectRegularFood(bot);
         if (regularFood) {
           await this._eatItem(bot, regularFood);
-          await sleep(80 + rand(0, 40)); // небольшая пауза между едой и гаплом
+          ateAnything = true;
+          await sleep(80 + rand(0, 40));
         }
-        await this._eatBestGapple(bot); // гапл всегда, независимо от HP
+        const hadGapple = await this._eatBestGapple(bot);
+        ateAnything = ateAnything || hadGapple;
       } else if (mode === "gapple_if_have") {
         const had = await this._eatBestGapple(bot);
-        if (!had) { const food = this._selectRegularFood(bot); if (food) await this._eatItem(bot, food); }
+        if (!had) { const food = this._selectRegularFood(bot); if (food) { await this._eatItem(bot, food); ateAnything = true; } }
+        else { ateAnything = true; }
       } else if (mode === "regular_then_gapple") {
         const food = this._selectRegularFood(bot);
-        if (food) await this._eatItem(bot, food);
+        if (food) { await this._eatItem(bot, food); ateAnything = true; }
         await sleep(100);
-        await this._eatBestGapple(bot);
+        const hadG = await this._eatBestGapple(bot);
+        ateAnything = ateAnything || hadG;
       } else {
         const food = this._selectRegularFood(bot);
-        if (food) await this._eatItem(bot, food);
+        if (food) { await this._eatItem(bot, food); ateAnything = true; }
       }
       try { bot.setControlState("back", false); } catch {}
     } finally {
       this._isEating      = false;
       this._isDoingAction = false;
-      this._forceAttack   = 15;  // 15 тиков × 80мс = 1.2с боя после еды
+      // FIX: если нечего было есть — ставим большой форс-атак чтобы не крутиться в цикле
+      this._forceAttack = ateAnything ? 20 : 40;
+      if (!ateAnything) {
+        this._log('⚠️ Нечего есть (нет еды/гапла или КД) — форс-атака 40 тиков');
+      }
     }
   }
 
@@ -614,14 +647,14 @@ class PvpController {
   }
 
   async _tryHealPotion(bot) {
-    const p = bot.inventory.items().find(i => HEAL_POTION.some(k => i.name.toLowerCase().includes(k)));
+    const p = bot.inventory.items().find(i => isPotionOfType(i, HEAL_POTION));
     if (!p) return false;
     await this._applyPotionOnSelf(bot, p);
     return true;
   }
 
   async _tryBuffPotion(bot) {
-    const p = bot.inventory.items().find(i => BUFF_POTION.some(k => i.name.toLowerCase().includes(k)));
+    const p = bot.inventory.items().find(i => isPotionOfType(i, BUFF_POTION));
     if (!p) return;
     await this._applyPotionOnSelf(bot, p);
   }
@@ -658,7 +691,7 @@ class PvpController {
       const enemyAmp = enemyFx.amplifier ?? 0;
       if (myFx && (myFx.amplifier ?? 0) >= enemyAmp) continue;
 
-      const candidates = items.filter(i => i.name.toLowerCase().includes(keyword));
+      const candidates = items.filter(i => isPotionOfType(i, [keyword]));
       if (!candidates.length) continue;
       const strong = enemyAmp >= 1
         ? candidates.find(i => { const n = i.name.toLowerCase(); return n.includes('strong') || n.includes('_ii'); })
@@ -674,9 +707,9 @@ class PvpController {
     const hasAnyBuff = Object.keys(myEffects).some(id => COMBAT_BUFF_IDS.has(Number(id)));
     if (hasAnyBuff) return;
 
-    const buff = items.find(i => BUFF_POTION.some(k => i.name.toLowerCase().includes(k)));
+    const buff = items.find(i => isPotionOfType(i, BUFF_POTION));
     if (!buff) return;
-    this._log(`🧪 Бафф (нет активных эффектов): ${buff.name}`);
+    this._log(`🧪 Бафф (нет активных эффектов): ${buff.name} eff=${getPotionEffect(buff)}`);
     await this._applyPotionOnSelf(bot, buff);
   }
 
@@ -692,7 +725,8 @@ class PvpController {
       await sleep(50 + rand(0, 30));
 
       const name = potion.name.toLowerCase();
-      const isSplash = name.includes('splash') || name.includes('lingering');
+      const isSplash = name.includes('splash') || name.includes('lingering') ||
+        (name === 'potion' && potion.nbt?.value?.Potion?.value?.includes('splash')); // legacy
 
       if (isSplash) {
         // Бросаем вверх на себя (падает на нас)
@@ -756,11 +790,13 @@ class PvpController {
     const dist = bot.entity.position.distanceTo(_dpPos);
     if (dist > 6) return;
     const items = bot.inventory.items();
+    const DEBUFF_KEYS = ['instant_damage','harming','poison','weakness','slowness','blindness'];
     const debuff = items.find(i => {
       const n = i.name.toLowerCase();
-      return (n.includes('splash') || n.includes('lingering')) &&
-             (n.includes('instant_damage') || n.includes('harming') ||
-              n.includes('poison') || n.includes('weakness') || n.includes('slowness'));
+      const isSplashType = n.includes('splash') || n.includes('lingering');
+      if (!isSplashType) return false;
+      // Check by name (legacy) OR by NBT effect
+      return isPotionOfType(i, DEBUFF_KEYS);
     });
     if (!debuff) return;
     await this._doSplashPotion(bot, 'debuff', debuff);
