@@ -17,7 +17,7 @@ const { AntiDetect } = require("./anti-detect");
 const SWORD_NAMES   = ["wooden_sword","stone_sword","iron_sword","golden_sword","diamond_sword","netherite_sword","mace"];
 const AXE_NAMES     = ["wooden_axe","stone_axe","iron_axe","golden_axe","diamond_axe","netherite_axe"];
 const HEAL_POTION   = ["healing","instant_health","regeneration"];
-const BUFF_POTION   = ["strength","speed","fire_resistance","resistance","absorption"];
+const BUFF_POTION   = ["strength","speed","swiftness","fire_resistance","resistance","absorption"];
 const DEBUFF_POTION = ["poison","weakness","slowness","blindness","instant_damage","harming"];
 
 const FOOD_PRIORITY = [
@@ -335,9 +335,9 @@ class PvpController {
     }
 
     // FIX: ДВИЖЕНИЕ — только один режим управления
-    this._log(`🗺 dist=${dist.toFixed(2)} → ${dist>8?"PATHFINDER (>8)":dist>3.5?"СПРИНТ (3.5-8)":"АТАКА (≤3.5)"}`);
+    this._log(`🗺 dist=${dist.toFixed(2)} → ${dist>14?"PATHFINDER (>14)":dist>3.5?"СПРИНТ (3.5-14)":"АТАКА (≤3.5)"}`);
     if (dist > 3.5) {
-      if (dist > 8) {
+      if (dist > 14) {
         // Далеко: pathfinder сам управляет и поворотом и движением
         // НЕ вызываем bot.look — это конфликтует с pathfinder и вызывает зависание на 15 блоках
         // Используем pathfinder для навигации через препятствия
@@ -399,8 +399,8 @@ class PvpController {
     try { bot.setControlState('left',  false); } catch {}
     try { bot.setControlState('right', false); } catch {}
 
-    // FIX: LoS — при dist < 2.5 всегда бьём (вплотную), иначе проверяем
-    const _los = dist < 2.5 || hasLineOfSight(bot, target);
+    // LoS — всегда проверяем (убрали bypass dist<2.5 — он позволял бить через стены)
+    const _los = hasLineOfSight(bot, target);
     if (!_los) {
       this._log(`👁 Нет LoS — цель за блоком dist=${dist.toFixed(2)}`);
       try { bot.setControlState('forward', true); } catch {}
@@ -408,8 +408,9 @@ class PvpController {
     }
     this._log(`👁 LoS OK dist=${dist.toFixed(2)}`);
 
-    // Прицел + look
-    try { await bot.look(yaw, pitch, true); } catch {}
+    // Прицел + look: клэмп pitch >= 0 (никогда не смотрим вверх при ударе)
+    const _atkPitch = Math.max(pitch, 0.0);
+    try { await bot.look(yaw, _atkPitch, true); } catch {}
     await sleep(30 + rand(0, 30));
 
     let finalDist;
@@ -636,7 +637,7 @@ class PvpController {
 
     // effectId → keyword (Minecraft vanilla effect IDs)
     const EFFECT_MAP = {
-      1:  'speed',
+      1:  'swiftness',  // mineflayer: potion_of_swiftness (НЕ speed)
       5:  'strength',
       3:  'haste',
       8:  'jump',
@@ -668,8 +669,9 @@ class PvpController {
       return;
     }
 
-    // 2. General buff if we have no active buff effects
-    const hasAnyBuff = Object.keys(myEffects).some(id => EFFECT_MAP[Number(id)] !== undefined);
+    // 2. General buff only if нет силы/скорости (не блокируем по regeneration/absorption)
+    const COMBAT_BUFF_IDS = new Set([1,5,3]); // speed, strength, haste
+    const hasAnyBuff = Object.keys(myEffects).some(id => COMBAT_BUFF_IDS.has(Number(id)));
     if (hasAnyBuff) return;
 
     const buff = items.find(i => BUFF_POTION.some(k => i.name.toLowerCase().includes(k)));
