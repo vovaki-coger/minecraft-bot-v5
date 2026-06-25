@@ -42,12 +42,7 @@ export default function CenterPanel({ bot }: Props) {
               : bot.status === "connecting" ? "Подключение..."
               : "Оффлайн"}
           </span>
-          {bot.survivorMode && (
-            <span className="text-xs px-1.5 py-0.5 rounded pulse"
-              style={{ background: "#2a1a00", color: "#e67e22", border: "1px solid #e67e22" }}>
-              ⚔️ ВЫЖИВАЛЬЩИК
-            </span>
-          )}
+          
         </div>
         <span className="text-xs" style={{ color: "#555" }}>
           {bot.config.host}:{bot.config.port}
