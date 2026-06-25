@@ -33,14 +33,6 @@ export default function BotControls({ bot }: Props) {
     setShowNickInput(false);
   }
 
-  async function handleSurvivor() {
-    if (bot.survivorMode) {
-      await handle("survivor", () => window.electronAPI.bot.stopSurvivor(bot.id));
-    } else {
-      await handle("survivor", () => window.electronAPI.bot.startSurvivor(bot.id));
-    }
-  }
-
   async function handlePvp() {
     const pvpMode = (bot as any).pvpMode;
     if (pvpMode) {
@@ -110,31 +102,18 @@ export default function BotControls({ bot }: Props) {
             </button>
           </div>
 
-          {/* Survivor + PvP (side by side) */}
-          <div className="flex gap-1.5">
-            <button
-              className="btn text-xs flex-1"
-              onClick={handleSurvivor}
-              disabled={!isConnected || !bot.config.aiEnabled || loading === "survivor"}
-              style={bot.survivorMode
-                ? { borderColor: "#e74c3c", color: "#e74c3c", background: "#2a0a0a" }
-                : { background: "#1e1400", borderColor: "#e67e22", color: "#e67e22" }}
-            >
-              {loading === "survivor" ? "⏳..." : bot.survivorMode ? "⏹ Выжив." : "⚔️ Выживальщик"}
-            </button>
-
-            <button
-              className="btn text-xs flex-1"
-              onClick={handlePvp}
-              disabled={!isConnected || loading === "pvp"}
-              title="Автоматически атакует всех игроков поблизости (кроме тимейтов)"
-              style={pvpMode
-                ? { borderColor: "#e74c3c", color: "#e74c3c", background: "#2a0a0a", animation: "pulse 1s infinite" }
-                : { background: "#1a0a1a", borderColor: "#9b59b6", color: "#9b59b6" }}
-            >
-              {loading === "pvp" ? "⏳..." : pvpMode ? "⏹ PvP: Вкл" : "💀 PvP-режим"}
-            </button>
-          </div>
+          {/* PvP */}
+          <button
+            className="btn text-xs"
+            onClick={handlePvp}
+            disabled={!isConnected || loading === "pvp"}
+            title="Автоматически атакует всех игроков поблизости (кроме тимейтов)"
+            style={pvpMode
+              ? { borderColor: "#e74c3c", color: "#e74c3c", background: "#2a0a0a", animation: "pulse 1s infinite" }
+              : { background: "#1a0a1a", borderColor: "#9b59b6", color: "#9b59b6" }}
+          >
+            {loading === "pvp" ? "⏳..." : pvpMode ? "⏹ PvP: Вкл" : "💀 PvP-режим"}
+          </button>
 
           {/* Nick change */}
           <div className="flex gap-1">
