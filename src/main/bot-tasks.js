@@ -1242,36 +1242,42 @@ class TaskManager {
     return dz > 0 ? 3 : 2;                                    // юг / север
   }
 
-  // ── Безопасное копание: стопаем pathfinder → aim → canSee → ручной dig ────
+  // ── Безопасное копание: pathfinder стоп → aim → canSee → adaptive dig ──────
   //
-  //  FIX 1 (ранний отпуск кнопки): bot.dig() использует таймер mineflayer
-  //    который отправляет FINISH_DIG на ~290мс раньше реального ломания блока.
-  //    Решение: ручной block_dig protocol с буфером 280мс поверх digTime().
+  //  FIX-A (ранний отпуск, adaptive-retry):
+  //    После FINISH_DESTROY_BLOCK ждём 250мс blockUpdate-подтверждения.
+  //    Если блок не сломался (сервер отклонил — TPS lag / пинг) → ещё 400мс
+  //    и повторяем FINISH. Так работает "anarchia adaptive breaking".
   //
-  //  FIX 2 (ломает через стены): добавлен canSeeBlock() — если не видит блок
-  //    → возвращаем false, бот не пытается копать сквозь стену.
+  //  FIX-B (краш через 5 минут):
+  //    1. bot.digTime() для неломаемых блоков (bedrock) = Infinity →
+  //       while(elapsed < Infinity) = вечный цикл setTimeout → OOM краш.
+  //       Решение: isFinite() проверка + cap 8000мс.
+  //    2. _client.write() без null-check = краш при дисконнекте.
+  //       Решение: guard (_clientWrite helper) + try/catch.
+  //
+  //  FIX-C (ломает через стены): canSeeBlock() перед копанием.
   async _safeDigBlock(block) {
     if (!block || !this._running) return false;
     try {
-      // Стопаем pathfinder чтобы он не перезаписывал взгляд после lookAt
+      // Стопаем pathfinder чтобы не перезаписывал взгляд после lookAt
       try { this.bot.pathfinder.stop(); } catch {}
       await this._sleep(55 + Math.random() * 20);
 
       await this._equipBestTool(block);
 
-      // Точка прицела — видимая грань (не центр блока)
+      // Прицел — видимая грань
       const eyeY = this.bot.entity.position.y + 1.62;
       const botX = this.bot.entity.position.x;
       const botZ = this.bot.entity.position.z;
       const bx   = block.position.x;
       const by   = block.position.y;
       const bz   = block.position.z;
-
       let aimX, aimY, aimZ;
       if (eyeY > by + 1.02) {
-        aimX = bx + 0.5; aimY = by + 0.91; aimZ = bz + 0.5; // верхняя грань
+        aimX = bx + 0.5; aimY = by + 0.91; aimZ = bz + 0.5;
       } else if (eyeY < by - 0.02) {
-        aimX = bx + 0.5; aimY = by + 0.09; aimZ = bz + 0.5; // нижняя грань
+        aimX = bx + 0.5; aimY = by + 0.09; aimZ = bz + 0.5;
       } else {
         const sdx = (botX < bx) ? bx + 0.09 : bx + 0.91;
         const sdz = (botZ < bz) ? bz + 0.09 : bz + 0.91;
@@ -1281,49 +1287,87 @@ class TaskManager {
           aimX = bx + 0.5; aimY = by + 0.5; aimZ = sdz;
         }
       }
-
       const Vec3 = require('vec3');
       await this.bot.lookAt(new Vec3(aimX, aimY, aimZ), true).catch(() => {});
-      await this._sleep(75 + Math.random() * 30); // Look packet дошёл до сервера
+      await this._sleep(75 + Math.random() * 30);
 
-      // Перечитываем блок (мог упасть пока делали lookAt)
       const fresh = this.bot.blockAt(block.position);
       if (!fresh || fresh.type === 0) return false;
 
-      // FIX 2: проверяем видимость — не копаем через стены
-      if (typeof this.bot.canSeeBlock === 'function' && !this.bot.canSeeBlock(fresh)) {
-        return false;
-      }
+      // FIX-C: не копаем через стены
+      if (typeof this.bot.canSeeBlock === 'function' && !this.bot.canSeeBlock(fresh)) return false;
 
-      // FIX 1: ручной dig-протокол с буфером 280мс (anarchia-стиль)
-      // bot.dig() отправляет FINISH_DESTROY_BLOCK слишком рано (~290мс до реального ломания).
-      // Решение: сами считаем время + буфер и шлём пакеты напрямую.
-      const face  = this._calcDigFace(fresh);
-      const digMs = this.bot.digTime(fresh);
+      // FIX-B защита: неломаемые блоки дают Infinity → бесконечный цикл → краш
+      const rawDig = this.bot.digTime(fresh);
+      if (!isFinite(rawDig) || rawDig < 0) return false; // bedrock и т.п.
+      const digMs = Math.min(rawDig, 8000); // cap 8 сек — не должно быть дольше
+      const face   = this._calcDigFace(fresh);
+
+      // FIX-B защита: null-safe write (краш при дисконнекте)
+      const cw = (status) => {
+        try { this.bot._client?.write('block_dig', { status, location: fresh.position, face }); }
+        catch {}
+      };
 
       if (digMs <= 50) {
-        // Мгновенная ломка (рука/инструмент с Efficiency или мягкий блок)
-        this.bot._client.write('block_dig', { status: 0, location: fresh.position, face });
-        this.bot.swingArm('right', true);
-        this.bot._client.write('block_dig', { status: 2, location: fresh.position, face });
+        // Мгновенная ломка
+        cw(0); this.bot.swingArm('right', true); cw(2);
         await this._sleep(120);
-      } else {
-        // Нормальная ломка — START → ждём → FINISH
-        this.bot._client.write('block_dig', { status: 0, location: fresh.position, face });
-        // Машем рукой каждые 400мс во время ломки (анимация удара)
-        const swingMs = 400;
-        let elapsed = 0;
-        while (elapsed < digMs + 280) {
-          const step = Math.min(swingMs, digMs + 280 - elapsed);
-          await this._sleep(step);
-          elapsed += step;
-          if (elapsed < digMs + 280) this.bot.swingArm('right', true);
-        }
-        // Отправляем FINISH_DESTROY_BLOCK
-        this.bot._client.write('block_dig', { status: 2, location: fresh.position, face });
-        await this._sleep(130); // ждём blockUpdate от сервера
+        return true;
       }
-      return true;
+
+      // ── FIX-A: Adaptive-retry dig ─────────────────────────────────────────
+      // Проблема: mineflayer digTime() занижает реальное время ломания на сервере
+      // (сервер тикает медленнее 20 TPS + пинг). Один раз отправить FINISH недостаточно.
+      //
+      // Алгоритм:
+      //   1. START → ждём digMs → FINISH
+      //   2. Ждём 250мс blockUpdate-подтверждения.
+      //   3. Если блок всё ещё стоит → ещё 400мс и ещё FINISH (retry).
+      //   4. Retry до 3 раз (суммарно до +1.2 сек сверх теории).
+
+      cw(0); // START_DESTROY_BLOCK
+
+      // Свингаем рукой каждые 400мс пока идёт ломка
+      let elapsed = 0;
+      while (elapsed < digMs && this._running) {
+        const step = Math.min(400, digMs - elapsed);
+        await this._sleep(step);
+        elapsed += step;
+        if (elapsed < digMs && this._running) this.bot.swingArm('right', true);
+      }
+      if (!this._running) { cw(1); return false; } // CANCEL_DESTROY_BLOCK
+
+      // Вспомогательная функция: ждём blockUpdate на позиции блока max=waitMs
+      const waitBreak = (waitMs) => new Promise(resolve => {
+        if (!this.bot || !this._running) { resolve(false); return; }
+        let done = false;
+        const timer = setTimeout(() => {
+          if (!done) { done = true; this.bot.removeListener('blockUpdate', h); resolve(false); }
+        }, waitMs);
+        const h = (oldB) => {
+          if (!done &&
+              oldB && oldB.position &&
+              Math.round(oldB.position.x) === fresh.position.x &&
+              Math.round(oldB.position.y) === fresh.position.y &&
+              Math.round(oldB.position.z) === fresh.position.z) {
+            done = true; clearTimeout(timer);
+            this.bot.removeListener('blockUpdate', h); resolve(true);
+          }
+        };
+        this.bot.on('blockUpdate', h);
+      });
+
+      // Отправляем FINISH и ждём подтверждения (adaptive retry)
+      for (let attempt = 0; attempt < 3 && this._running; attempt++) {
+        cw(2); // FINISH_DESTROY_BLOCK
+        const broke = await waitBreak(250);
+        if (broke) return true; // Сервер подтвердил — блок сломан
+        // Сервер отклонил (TPS lag) — ждём ещё и повторяем
+        await this._sleep(400);
+      }
+
+      return true; // даже если не подтвердил — возможно в пути
     } catch (err) {
       return false;
     }
