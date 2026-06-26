@@ -435,7 +435,17 @@ class PvpBrain {
     try {
       prog(3, '📚 Генерируем 1 000 000 сценариев (5 категорий)...');
       await yieldLoop(); // ← даём IPC доставить сообщение до блокировки
-      const all = buildSeedData();
+      // FIX white-screen: buildSeedData() блокировал Event Loop на 10-20 сек (1M сценариев).
+      // Worker Thread — main process остаётся отзывчивым, IPC не зависает → белый экран исчезает.
+      const all = await new Promise((resolve, reject) => {
+        const { Worker } = require('worker_threads');
+        // buildSeedData() самодостаточна (все helpers внутри) → можно сериализовать
+        const src = `const{parentPort}=require('worker_threads');parentPort.postMessage((${buildSeedData.toString()})());`;
+        const w = new Worker(src, { eval: true });
+        w.on('message', resolve);
+        w.on('error', reject);
+        w.on('exit', code => { if (code !== 0) reject(new Error('BuildSeedData worker exited: ' + code)); });
+      });
       prog(18, `✂️ Выбираем 200 000 из ${all.length.toLocaleString()} (ходьба/еда/pvp/криты/зелья)...`);
 
       const n = Math.min(200000, all.length);
