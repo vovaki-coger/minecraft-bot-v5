@@ -94,6 +94,13 @@ class AnarchyProtocol {
   }
 
   stop() {
+    // Останавливаем текущую задачу taskManager
+    try {
+      const tm = this.instance?.taskManager;
+      if (tm && tm._running) tm.stop();
+    } catch {}
+    // Останавливаем pathfinder
+    try { const bot = this.instance?.bot; if (bot?.pathfinder) bot.pathfinder.stop(); } catch {}
     this.isRunning = false;
     this._phase = "idle";
     if (this._loop) { clearTimeout(this._loop); this._loop = null; }
@@ -429,6 +436,9 @@ class AnarchyProtocol {
     // ─ РЫБАЛКА ─
     if (/рыб|fish/.test(t)) {
       // Базовая рыбалка через отдельную логику
+      if (/руд[ыа]|mine.ore|ore.mine|добыч.*руд|шахт.*руд/.test(t))
+        return { task: "mine_ores", args: { radius: 48, targetY: 11 } };
+
       return null; // TODO: добавить задачу рыбалки в bot-tasks
     }
     // ─ СТРОИТЬ ФЕРМУ (построить поля) ─
