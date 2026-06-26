@@ -1217,11 +1217,11 @@ class TaskManager {
       }
 
       const Vec3 = require('vec3');
-      // Смотрим на верхнюю грань (y+0.9) — стандарт для взаимодействия с землёй
+      // FIX: плавный поворот (как PVP brain) вместо мгновенного snap
       const aimY = block.position.y + 0.9;
       const aim  = new Vec3(block.position.x + 0.5, aimY, block.position.z + 0.5);
-      await this.bot.lookAt(aim, true).catch(() => {});
-      await this._sleep(70 + Math.random() * 20);
+      await this._smoothLookAt(aim);
+      await this._sleep(55 + Math.random() * 20);
 
       await this.bot.activateBlock(block).catch(() => {});
       this.bot.swingArm('right', true); // анимация правой руки
@@ -1288,14 +1288,21 @@ class TaskManager {
         }
       }
       const Vec3 = require('vec3');
-      await this.bot.lookAt(new Vec3(aimX, aimY, aimZ), true).catch(() => {});
-      await this._sleep(75 + Math.random() * 30);
+      // FIX: плавный поворот (как у PVP-брайна) вместо мгновенного snap — убирает дёрганье головы
+      await this._smoothLookAt(new Vec3(aimX, aimY, aimZ));
+      await this._sleep(60 + Math.random() * 20);
 
       const fresh = this.bot.blockAt(block.position);
       if (!fresh || fresh.type === 0) return false;
 
-      // FIX-C: не копаем через стены
-      if (typeof this.bot.canSeeBlock === 'function' && !this.bot.canSeeBlock(fresh)) return false;
+      // FIX-C: не копаем через стены.
+      // Исключение: блок ПРЯМО над головой — canSeeBlock() даёт false для нижней грани
+      // которая видна боту снизу, поэтому для таких блоков проверку пропускаем.
+      const _eyeY = this.bot.entity.position.y + 1.62;
+      const _blockAbove = fresh.position.y > _eyeY &&
+        Math.abs(this.bot.entity.position.x - fresh.position.x - 0.5) < 1.0 &&
+        Math.abs(this.bot.entity.position.z - fresh.position.z - 0.5) < 1.0;
+      if (!_blockAbove && typeof this.bot.canSeeBlock === 'function' && !this.bot.canSeeBlock(fresh)) return false;
 
       // FIX-B защита: неломаемые блоки дают Infinity → бесконечный цикл → краш
       const rawDig = this.bot.digTime(fresh);
@@ -1373,12 +1380,49 @@ class TaskManager {
     }
   }
 
+  // ── Плавный поворот головы (как в PVP-брайне) ────────────────────────────
+  // Интерполирует yaw+pitch за 2-3 шага с лёгким шумом — убирает дёрганье
+  async _smoothLookAt(pos) {
+    try {
+      const ep = this.bot.entity.position.offset(0, 1.62, 0);
+      const dx = pos.x - ep.x;
+      const dy = pos.y - ep.y;
+      const dz = pos.z - ep.z;
+      const targetYaw   = Math.atan2(-dx, dz);
+      const targetPitch = Math.atan2(-dy, Math.sqrt(dx * dx + dz * dz));
+      const steps    = 2 + Math.floor(Math.random() * 2); // 2-3 шага
+      const curYaw   = this.bot.entity.yaw;
+      const curPitch = this.bot.entity.pitch;
+      const noise    = () => (Math.random() - 0.5) * 0.04;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        await this.bot.look(
+          curYaw   + (targetYaw   - curYaw)   * t + noise(),
+          curPitch + (targetPitch - curPitch) * t + noise(),
+          true
+        ).catch(() => {});
+        if (i < steps) await this._sleep(18 + Math.floor(Math.random() * 14));
+      }
+    } catch {}
+  }
+
   async _gotoNearest(pos, range = 3) {
-    // FIX: убран lookAt во время движения — pathfinder сам управляет поворотом,
-    // конфликтующий lookAt(false) приводил к случайному взгляду после остановки
-    await this.bot.pathfinder.goto(
-      new goals.GoalNear(pos.x, pos.y, pos.z, range)
-    ).catch(() => {});
+    try {
+      const dist = this.bot.entity?.position?.distanceTo(pos) ?? 99;
+      if (dist <= range) return; // уже на месте
+
+      // Включаем движение вперёд явно (как PVP brain) — pathfinder управляет направлением
+      try { this.bot.setControlState('sprint', false); } catch {}
+      try { this.bot.setControlState('forward', true); } catch {}
+
+      await this.bot.pathfinder.goto(
+        new goals.GoalNear(pos.x, pos.y, pos.z, range)
+      ).catch(() => {});
+    } catch {}
+
+    // Сбрасываем управление после прихода
+    try { this.bot.setControlState('forward', false); } catch {}
+    try { this.bot.setControlState('sprint', false); } catch {}
   }
 
   _reportInventory() {
