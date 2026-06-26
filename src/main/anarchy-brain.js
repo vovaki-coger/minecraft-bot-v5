@@ -42,10 +42,12 @@ function zero(overrides={}) {
   return o;
 }
 
-function buildSeedData() {
+// ИСПРАВЛЕНИЕ: buildSeedData теперь async — уступает Event Loop между каждой
+// категорией, чтобы IPC и другие задачи обрабатывались во время генерации.
+// Это устраняет белый экран / "Не отвечает" при первом запуске Анархии.
+async function buildSeedData() {
+  const yieldLoop = () => new Promise(r => setImmediate(r));
   const data=[];
-  const ACTIONS=["walk","mine_wood","mine_stone","hunt_food","farm_wheat","farm_tree",
-                 "farm_other","go_home","explore","craft","combat","build","excavate","fish"];
   function lbl(inp,...out){
     data.push({input:inp.map(v=>clamp(v,0,1)),output:out.map(v=>clamp(v,0,1))});
   }
@@ -55,20 +57,22 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
 
   // 1a. Идём к видимой цели (dist 0.2-1.0), всё нормально (80k)
+  await yieldLoop();
   for(let i=0;i<80000;i++){
     const dist=rnd(0.20,1.0),hp=rnd(0.4,1.0),hunger=rnd(0.4,1.0);
     const tool=pick([0,1]),food=1,enemy=rnd(0,0.25);
-    // walk=high, all others=0
     lbl([dist,hunger,rnd(0,0.7),tool,food,pick([0,1]),enemy,rnd(0.3,1),pick([0,1]),rnd(0,0.8),rnd(0,0.5),hp],
       clamp(0.87+dist*0.11,0.82,0.98),0,0,0,0,0,0,0,0,0,0,0,0,0);
   }
   // 1b. Идём домой (инвентарь полон) (50k)
+  await yieldLoop();
   for(let i=0;i<50000;i++){
     const inv=rnd(0.78,1.0),dist=rnd(0.15,0.90),hp=rnd(0.3,1.0);
     lbl([dist,rnd(0.4,1),inv,pick([0,1]),pick([0,1]),pick([0,1]),rnd(0,0.3),rnd(0,1),pick([0,1]),rnd(0,1),rnd(0,1),hp],
       clamp(0.80+inv*0.15,0.72,0.97),0,0,0,0,0,0,clamp(inv*0.32,0.18,0.45),0,0,0,0,0,0);
   }
   // 1c. Убегаем от врагов (50k)
+  await yieldLoop();
   for(let i=0;i<50000;i++){
     const enemy=rnd(0.5,1.0),hp=rnd(0.05,0.60),dist=rnd(0.05,0.50);
     const hunger=rnd(0.2,0.8);
@@ -76,12 +80,14 @@ function buildSeedData() {
       clamp(0.55+enemy*0.40,0.45,0.90),0,0,0,0,0,0,0,0,0,clamp(enemy*(0.8-hp)*0.8,0,0.65),0,0,0);
   }
   // 1d. Исследование (нет особых целей, ночью/рано) (40k)
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const dist=rnd(0.10,0.80),time=rnd(0,0.5),hp=rnd(0.5,1.0),hunger=rnd(0.5,1.0);
     lbl([dist,hunger,rnd(0,0.5),pick([0,1]),pick([0,1]),pick([0,1]),rnd(0,0.2),time,pick([0,1]),rnd(0,0.5),rnd(0,0.3),hp],
       clamp(0.72+dist*0.22,0.58,0.95),0,0,0,0,0,0,0,clamp(0.18+(0.5-time)*0.25,0.10,0.42),0,0,0,0,0);
   }
   // 1e. Любая навигация — широкое покрытие (80k)
+  await yieldLoop();
   for(let i=0;i<80000;i++){
     const dist=rnd(0.05,1.0),enemy=rnd(0,0.4),hp=rnd(0.3,1.0),hunger=rnd(0.3,1.0);
     lbl([dist,hunger,rnd(0,0.9),pick([0,1]),pick([0,1]),pick([0,1]),enemy,rnd(0,1),pick([0,1]),rnd(0,1),rnd(0,1),hp],
@@ -92,6 +98,7 @@ function buildSeedData() {
   // ПОВЕДЕНИЕ 2: РУБКА ДЕРЕВА — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
   // 2a. Много деревьев рядом, есть топор, инв не полон (50k)
+  await yieldLoop();
   for(let i=0;i<50000;i++){
     const nature=rnd(0.5,1.0),tool=1,inv=rnd(0,0.7),hp=rnd(0.4,1.0);
     const hunger=rnd(0.5,1.0),enemy=rnd(0,0.25);
@@ -99,12 +106,14 @@ function buildSeedData() {
       0,clamp(0.85+nature*0.13,0.78,0.97),0,0,0,0,0,0,0,0,0,0,0,0);
   }
   // 2b. Нет инструментов — нужна рубка, но идём за инструментами (30k)
+  await yieldLoop();
   for(let i=0;i<30000;i++){
     const nature=rnd(0.3,0.7),tool=0,inv=rnd(0,0.6);
     lbl([rnd(0.1,0.5),rnd(0.5,1),inv,tool,pick([0,1]),pick([0,1]),rnd(0,0.2),rnd(0.3,1),pick([0,1]),nature,rnd(0,0.3),rnd(0.4,1)],
       clamp(0.45+nature*0.25,0.35,0.70),clamp(0.30+(1-tool)*0.20,0.22,0.55),0,0,0,0,0,0,0,0,0,0,0,0);
   }
   // 2c. Голоден, продолжаем рубку но делаем перерывы (20k)
+  await yieldLoop();
   for(let i=0;i<20000;i++){
     const hunger=rnd(0,0.45),food=1,nature=rnd(0.4,0.8),tool=1;
     lbl([rnd(0,0.20),hunger,rnd(0,0.6),tool,food,pick([0,1]),rnd(0,0.2),rnd(0.4,1),pick([0,1]),nature,rnd(0,0.3),rnd(0.4,1)],
@@ -114,12 +123,14 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 3: ДОБЫЧА КАМНЯ/РУДЫ — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const tool=1,inv=rnd(0,0.72),hp=rnd(0.4,1.0),enemy=rnd(0,0.3);
     const hunger=rnd(0.4,1.0),time=rnd(0,1);
     lbl([rnd(0,0.18),hunger,inv,tool,pick([0,1]),pick([0,1]),enemy,time,pick([0,1]),rnd(0,0.5),rnd(0,0.3),hp],
       0,0,clamp(0.82+tool*0.14,0.78,0.97),0,0,0,0,0,0,0,0,0,0,0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const tool=pick([0,1]),inv=rnd(0,0.80),hunger=rnd(0.4,1.0);
     lbl([rnd(0,0.25),hunger,inv,tool,pick([0,1]),pick([0,1]),rnd(0,0.25),rnd(0,1),pick([0,1]),rnd(0,0.5),rnd(0,0.3),rnd(0.3,1)],
@@ -129,12 +140,14 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 4: ОХОТА / ЕДА — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<55000;i++){
     const hunger=rnd(0,0.48),food=pick([0,1]),hp=rnd(0.3,1.0);
     const tool=1,enemy=rnd(0,0.3),nature=rnd(0.2,0.8);
     lbl([rnd(0,0.30),hunger,rnd(0,0.7),tool,food,pick([0,1]),enemy,rnd(0.3,1),pick([0,1]),nature,rnd(0,0.4),hp],
       0,0,0,clamp(0.80+(0.48-hunger)*1.5,0.65,0.97),0,0,0,0,0,0,0,0,0,0);
   }
+  await yieldLoop();
   for(let i=0;i<45000;i++){
     const hunger=rnd(0.48,0.72),food=0,hp=rnd(0.3,1.0);
     lbl([rnd(0,0.40),hunger,rnd(0,0.7),pick([0,1]),food,pick([0,1]),rnd(0,0.25),rnd(0.3,1),pick([0,1]),rnd(0.2,0.7),rnd(0,0.4),hp],
@@ -144,11 +157,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 5: ФЕРМА ПШЕНИЦЫ — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const crops=rnd(0.4,1.0),seeds=1,inv=rnd(0,0.7),hunger=rnd(0.4,1.0);
     lbl([rnd(0,0.20),hunger,inv,pick([0,1]),pick([0,1]),seeds,rnd(0,0.2),rnd(0.3,1),pick([0,1]),rnd(0.2,0.7),crops,rnd(0.4,1)],
       0,0,0,0,clamp(0.83+crops*0.14,0.78,0.97),0,0,0,0,0,0,0,0,0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const crops=rnd(0.2,0.7),seeds=pick([0,1]),inv=rnd(0,0.75);
     lbl([rnd(0,0.35),rnd(0.4,1),inv,pick([0,1]),pick([0,1]),seeds,rnd(0,0.2),rnd(0.2,1),pick([0,1]),rnd(0,0.5),crops,rnd(0.4,1)],
@@ -158,11 +173,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 6: ФЕРМА ДЕРЕВЬЕВ — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const nature=rnd(0.3,0.8),tool=1,seeds=0,inv=rnd(0,0.72);
     lbl([rnd(0,0.18),rnd(0.5,1),inv,tool,pick([0,1]),seeds,rnd(0,0.25),rnd(0.3,1),pick([0,1]),nature,rnd(0,0.4),rnd(0.4,1)],
       0,0,0,0,0,clamp(0.82+nature*0.15,0.75,0.97),0,0,0,0,0,0,0,0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const nature=rnd(0.2,0.65),tool=pick([0,1]),hunger=rnd(0.4,1.0);
     lbl([rnd(0,0.30),hunger,rnd(0,0.75),tool,pick([0,1]),pick([0,1]),rnd(0,0.2),rnd(0,1),pick([0,1]),nature,rnd(0,0.5),rnd(0.3,1)],
@@ -172,6 +189,7 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 7: ФЕРМА ДРУГОГО (морковь/картофель/свёкла) — 100 000
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<100000;i++){
     const crops=rnd(0.2,0.9),seeds=pick([0,1]),inv=rnd(0,0.75),hunger=rnd(0.3,1.0);
     lbl([rnd(0,0.25),hunger,inv,pick([0,1]),pick([0,1]),seeds,rnd(0,0.2),rnd(0.2,1),pick([0,1]),rnd(0,0.6),crops,rnd(0.3,1)],
@@ -181,11 +199,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 8: ИДТИ ДОМОЙ / СДАТЬ РЕСУРСЫ — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const inv=rnd(0.75,1.0),chest=pick([0,1]),dist=rnd(0.05,0.70);
     lbl([dist,rnd(0.3,1),inv,pick([0,1]),pick([0,1]),pick([0,1]),rnd(0,0.3),rnd(0,1),chest,rnd(0,0.7),rnd(0,0.5),rnd(0.3,1)],
       0,0,0,0,0,0,0,clamp(0.83+inv*0.14,0.78,0.97),0,0,0,0,0,0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const inv=rnd(0.55,0.80),hunger=rnd(0,0.40),dist=rnd(0,0.5);
     lbl([dist,hunger,inv,pick([0,1]),pick([0,1]),pick([0,1]),rnd(0,0.25),rnd(0,1),pick([0,1]),rnd(0,0.7),rnd(0,0.5),rnd(0.3,1)],
@@ -195,11 +215,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 9: ИССЛЕДОВАНИЕ / RTP — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const time=rnd(0.3,1.0),inv=rnd(0,0.55),hunger=rnd(0.5,1.0),hp=rnd(0.5,1.0);
     lbl([rnd(0.2,0.9),hunger,inv,pick([0,1]),pick([0,1]),pick([0,1]),rnd(0,0.2),time,pick([0,1]),rnd(0,0.5),rnd(0,0.4),hp],
       0,0,0,0,0,0,0,0,clamp(0.75+time*0.20,0.65,0.95),0,0,0,0,0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const inv=rnd(0,0.65),time=rnd(0,0.7),hunger=rnd(0.4,1.0);
     lbl([rnd(0.1,0.8),hunger,inv,pick([0,1]),pick([0,1]),pick([0,1]),rnd(0,0.3),time,pick([0,1]),rnd(0,0.7),rnd(0,0.5),rnd(0.4,1)],
@@ -209,11 +231,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 10: КРАФТ ИНСТРУМЕНТОВ — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const tool=0,nature=rnd(0.2,0.7),inv=rnd(0.2,0.7);
     lbl([rnd(0,0.20),rnd(0.5,1),inv,tool,pick([0,1]),pick([0,1]),rnd(0,0.2),rnd(0.3,1),pick([0,1]),nature,rnd(0,0.5),rnd(0.4,1)],
       0,0,0,0,0,0,0,0,0,clamp(0.82+(1-tool)*0.14,0.78,0.97),0,0,0,0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const tool=pick([0,1]),inv=rnd(0.15,0.65),hunger=rnd(0.5,1.0);
     lbl([rnd(0,0.25),hunger,inv,tool,pick([0,1]),pick([0,1]),rnd(0,0.2),rnd(0.2,1),pick([0,1]),rnd(0.2,0.7),rnd(0,0.5),rnd(0.4,1)],
@@ -223,11 +247,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 11: БОЙ / САМОЗАЩИТА — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const enemy=rnd(0.4,1.0),hp=rnd(0.25,1.0),tool=1,hunger=rnd(0.3,1.0);
     lbl([rnd(0,0.25),hunger,rnd(0,0.8),tool,pick([0,1]),pick([0,1]),enemy,rnd(0,1),pick([0,1]),rnd(0,0.5),rnd(0,0.5),hp],
       0,0,0,0,0,0,0,0,0,0,clamp(0.78+enemy*0.18,0.68,0.97),0,0,0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const enemy=rnd(0.55,1.0),hp=rnd(0.05,0.30),tool=pick([0,1]);
     lbl([rnd(0,0.30),rnd(0.2,0.8),rnd(0,0.7),tool,pick([0,1]),pick([0,1]),enemy,rnd(0,1),pick([0,1]),rnd(0,0.5),rnd(0,0.5),hp],
@@ -237,11 +263,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 12: СТРОИТЕЛЬСТВО — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const inv=rnd(0.2,0.7),tool=1,time=rnd(0,0.5),hunger=rnd(0.5,1.0);
     lbl([rnd(0,0.20),hunger,inv,tool,pick([0,1]),pick([0,1]),rnd(0,0.2),time,pick([0,1]),rnd(0.2,0.7),rnd(0,0.5),rnd(0.4,1)],
       0,0,0,0,0,0,0,0,0,0,0,clamp(0.78+(1-time)*0.17,0.68,0.97),0,0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const time=rnd(0,0.65),inv=rnd(0.1,0.65),tool=pick([0,1]);
     lbl([rnd(0,0.28),rnd(0.4,1),inv,tool,pick([0,1]),pick([0,1]),rnd(0,0.25),time,pick([0,1]),rnd(0,0.6),rnd(0,0.5),rnd(0.3,1)],
@@ -251,11 +279,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 13: ПРОКЛАДКА ТОННЕЛЯ / EXCAVATE — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const tool=1,inv=rnd(0,0.72),hunger=rnd(0.4,1.0),enemy=rnd(0,0.25);
     lbl([rnd(0,0.20),hunger,inv,tool,pick([0,1]),pick([0,1]),enemy,rnd(0,1),pick([0,1]),rnd(0,0.4),rnd(0,0.3),rnd(0.4,1)],
       0,0,0,0,0,0,0,0,0,0,0,0,clamp(0.82+tool*0.14,0.78,0.97),0);
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const tool=pick([0,1]),inv=rnd(0,0.80),hunger=rnd(0.4,1.0);
     lbl([rnd(0,0.25),hunger,inv,tool,pick([0,1]),pick([0,1]),rnd(0,0.2),rnd(0,1),pick([0,1]),rnd(0,0.4),rnd(0,0.3),rnd(0.3,1)],
@@ -265,11 +295,13 @@ function buildSeedData() {
   // ═══════════════════════════════════════════════════════════════════
   // ПОВЕДЕНИЕ 14: РЫБАЛКА — 100 000 сценариев
   // ═══════════════════════════════════════════════════════════════════
+  await yieldLoop();
   for(let i=0;i<60000;i++){
     const inv=rnd(0,0.65),hunger=rnd(0,0.55),enemy=rnd(0,0.15),time=rnd(0.2,1.0);
     lbl([rnd(0,0.20),hunger,inv,pick([0,1]),pick([0,1]),pick([0,1]),enemy,time,pick([0,1]),rnd(0,0.5),rnd(0,0.4),rnd(0.4,1)],
       0,0,0,0,0,0,0,0,0,0,0,0,0,clamp(0.78+(0.55-hunger)*0.30,0.65,0.97));
   }
+  await yieldLoop();
   for(let i=0;i<40000;i++){
     const hunger=rnd(0.55,0.80),inv=rnd(0,0.70),time=rnd(0,1);
     lbl([rnd(0,0.30),hunger,inv,pick([0,1]),pick([0,1]),pick([0,1]),rnd(0,0.20),time,pick([0,1]),rnd(0,0.5),rnd(0,0.4),rnd(0.4,1)],
@@ -301,9 +333,12 @@ class AnarchyBrain {
     try{
       prog(3,'📚 Генерируем 1 600 000 сценариев (300к ходьба + 13 поведений × 100к)...');
       await yieldLoop();
-      const all=buildSeedData();
+      // ИСПРАВЛЕНИЕ: buildSeedData теперь async — уступает Event Loop между
+      // категориями, приложение не зависает и IPC остаётся отзывчивым.
+      const all = await buildSeedData();
       const target=Math.min(300000,all.length);
       prog(15,`✂️ Выбираем ${target.toLocaleString()} из ${all.length.toLocaleString()}...`);
+      await yieldLoop();
       for(let i=all.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[all[i],all[j]]=[all[j],all[i]];}
       const data=all.slice(0,target);
       prog(20,`🏴 Обучаем нейросеть Анархии (${data.length.toLocaleString()} сцен., 14 выходов)...`);
