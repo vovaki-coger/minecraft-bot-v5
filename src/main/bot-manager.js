@@ -996,6 +996,8 @@ class BotManager {
     instance.aiBrain?.stopAutonomous();
     instance.taskManager?.stopAll();
     instance.survivorAI?.stop();
+    instance.anarchyProtocol?.stop();
+    instance._brewingTask?.stop();
     // Восстанавливаем AI если была остановлена ферма/шахтёр
     if (instance._farmTaskRunning) {
       instance._farmTaskRunning = false;
@@ -1003,11 +1005,13 @@ class BotManager {
     }
     this._addChat(instance, "system", "⛔ Действие остановлено");
     this.emit("bot:actionStopped", { botId });
+    this.emit("bot:anarchyStopped", { botId });
   }
 
   stopMovement(botId) {
     const instance = this.bots.get(botId);
     if (!instance?.bot) return;
+    instance.anarchyProtocol?.stop();
     try { instance.bot.pathfinder?.stop(); } catch {}
     try { instance.bot.clearControlStates(); } catch {}
     this._addChat(instance, "system", "🚫 Движение остановлено");
