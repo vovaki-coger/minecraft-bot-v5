@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { BotState } from "../../store/appStore";
 
 interface PotionOption { id: string; label: string; emoji: string; ingredients: string[]; }
@@ -95,8 +95,33 @@ export default function FarmTab({ bot }: Props) {
   const currentPotion = POTION_OPTIONS.find(p => p.id === selectedPotion) || POTION_OPTIONS[0];
 
   const [loading, setLoading] = useState<string | null>(null);
+  const [brainTraining, setBrainTraining] = useState(false);
+  const [brainPct, setBrainPct] = useState(0);
+  const [brainMsg, setBrainMsg] = useState("Загрузка...");
+  const [brainType, setBrainType] = useState("");
   const isOnline = bot?.status === "online";
   const offline = !isOnline;
+
+  useEffect(() => {
+    const api = (window as any).electronAPI;
+    if (typeof api?.on !== "function") return;
+    const unsubs: Array<() => void> = [];
+    const u1 = api.on("bot:farmBrainTraining", (d: any) => {
+      if (!bot || d?.botId !== bot.id) return;
+      setBrainTraining(true);
+      setBrainPct(d.pct ?? 0);
+      setBrainMsg(d.msg ?? "Обучение...");
+      setBrainType(d.brainType ?? "");
+    });
+    if (typeof u1 === "function") unsubs.push(u1);
+    const u2 = api.on("bot:farmBrainReady", (d: any) => {
+      if (!bot || d?.botId !== bot.id) return;
+      setBrainTraining(false);
+      setBrainPct(100);
+    });
+    if (typeof u2 === "function") unsubs.push(u2);
+    return () => unsubs.forEach(u => { try { u(); } catch {} });
+  }, [bot?.id]);
 
   // ── crop groups ────────────────────────────────────────────────────────
   const cropGroups = Object.entries(
@@ -189,7 +214,54 @@ export default function FarmTab({ bot }: Props) {
   );
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto p-2 gap-2">
+    <div className="flex flex-col h-full overflow-y-auto p-2 gap-2" style={{ position: "relative" }}>
+
+      {/* ── ОВЕРЛЕЙ ОБУЧЕНИЯ ПВЕ-МОЗГА ────────────────────────────────── */}
+      {brainTraining && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 50,
+          background: "rgba(8,10,16,0.96)",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          gap: 18, borderRadius: 8,
+          backdropFilter: "blur(6px)",
+        }}>
+          {/* Спиннер */}
+          <div style={{
+            width: 52, height: 52, borderRadius: "50%",
+            border: "3px solid rgba(126,204,73,0.15)",
+            borderTopColor: "#7ecc49",
+            animation: "spin 0.9s linear infinite",
+          }} />
+          <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: 13, fontFamily: "monospace", color: "#7ecc49", fontWeight: "bold", textShadow: "0 0 12px rgba(126,204,73,0.5)" }}>
+              🌾 {brainType === "tree" ? "Ферма-дерево" : "Ферма-пшеница"}: обучение нейросети
+            </div>
+            <div style={{ fontSize: 11, fontFamily: "monospace", color: "#4a6a40", maxWidth: 260, lineHeight: 1.5 }}>
+              {brainMsg}
+            </div>
+          </div>
+          {/* Прогресс-бар */}
+          <div style={{ width: 220 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, fontFamily: "monospace", color: "#4a5a40", marginBottom: 6 }}>
+              <span>Прогресс</span>
+              <span style={{ color: "#7ecc49" }}>{Math.round(brainPct)}%</span>
+            </div>
+            <div style={{ height: 6, background: "rgba(126,204,73,0.1)", borderRadius: 3, overflow: "hidden", border: "1px solid rgba(126,204,73,0.2)" }}>
+              <div style={{
+                height: "100%", borderRadius: 3, transition: "width 0.4s ease",
+                width: `${brainPct}%`,
+                background: "linear-gradient(90deg, #3a6a20, #7ecc49)",
+                boxShadow: "0 0 8px rgba(126,204,73,0.4)",
+              }} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, fontFamily: "monospace", color: "#2a3a20" }}>
+            Первый запуск — обучается один раз, затем мгновенно
+          </div>
+        </div>
+      )}
+
       {offline && (
         <div className="text-xs text-center p-3" style={{ color: "#555" }}>
           Подключите бота для фарминга
