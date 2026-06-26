@@ -399,56 +399,15 @@ class AnarchyProtocol {
     if (/explore|исследу|гуля|rtp|путешеств/.test(t)) {
       return { name: "explore", args: {} };
     }
-    // ─ ПШЕНИЦА ─
-    if (/пшениц|wheat/.test(t)) {
-      const r = t.match(/радиус\s*(\d+)|radius\s*(\d+)/);
-      return { name: "farm_crops", args: { crop: "wheat_seeds", radius: r ? parseInt(r[1]||r[2]) : 15, bonemeal: true } };
+    // ─ РУДЫ (приоритет перед общим "шахта") ─
+    if (/руд[ыа]|mine.ore|ore.mine|добыч.*руд|шахт.*руд|алмаз|diamond|железо|железн|gold|золот/.test(t)) {
+      return { name: "mine_ores", args: { radius: 48, targetY: 11 } };
     }
-    // ─ МОРКОВЬ ─
-    if (/морков|carrot/.test(t)) {
-      return { name: "farm_crops", args: { crop: "carrot", radius: 15, bonemeal: true } };
-    }
-    // ─ КАРТОФЕЛЬ ─
-    if (/картофел|potato/.test(t)) {
-      return { name: "farm_crops", args: { crop: "potato", radius: 15, bonemeal: true } };
-    }
-    // ─ СВЁКЛА ─
-    if (/свёкл|свекл|beet/.test(t)) {
-      return { name: "farm_crops", args: { crop: "beetroot_seeds", radius: 15, bonemeal: true } };
-    }
-    // ─ БЫСТРЫЙ ФАРМ ─
-    if (/быстр|quick|боне|bone/.test(t)) {
-      return { name: "farm_quick", args: { crop: "wheat_seeds", bonemeal: true } };
-    }
-    // ─ ФЕРМА ДЕРЕВЬЕВ ─
-    if (/ферм.*дерев|tree.*farm|farm.*tree|деревья/.test(t)) {
-      const sap = /birch|берёз/.test(t) ? "birch_sapling" :
-                  /spruce|ёлк|ель/.test(t) ? "spruce_sapling" :
-                  /jungle|джунгл/.test(t) ? "jungle_sapling" : "oak_sapling";
-      return { name: "farm_trees_full", args: { sapling: sap, spacing: 3, bonemeal: true, radius: 20 } };
-    }
-    // ─ ШАХТА / ДОБЫЧА ─
-    if (/шахт|mine|добыч|excavat|тоннел|tunnel|копать/.test(t)) {
+    // ─ ШАХТА / ТОННЕЛЬ / КОПАТЬ ─
+    if (/шахт|excavat|тоннел|tunnel|копать/.test(t)) {
       const m = t.match(/(\d+)/);
       const depth = m ? parseInt(m[1]) : 30;
       return { name: "excavate", args: { width: 3, height: 3, depth } };
-    }
-    // ─ РЫБАЛКА ─
-    if (/рыб|fish/.test(t)) {
-      // Базовая рыбалка через отдельную логику
-      if (/руд[ыа]|mine.ore|ore.mine|добыч.*руд|шахт.*руд/.test(t))
-        return { task: "mine_ores", args: { radius: 48, targetY: 11 } };
-
-      return null; // TODO: добавить задачу рыбалки в bot-tasks
-    }
-    // ─ СТРОИТЬ ФЕРМУ (построить поля) ─
-    if (/строй|build.*farm|farm.*build/.test(t)) {
-      const m = t.match(/(\d+)/);
-      return { name: "build_farm", args: { size: m ? parseInt(m[1]) : 5 } };
-    }
-    // ─ ЗЕРНО (общий термин) ─
-    if (/зерн|grain|crop|посев|сеять/.test(t)) {
-      return { name: "farm_crops", args: { crop: "wheat_seeds", radius: 12, bonemeal: true } };
     }
     // ─ ЛЕС (общий) ─
     if (/лес|forest|рубк/.test(t)) {
