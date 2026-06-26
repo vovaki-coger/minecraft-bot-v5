@@ -132,17 +132,17 @@ class FarmTreeBrain {
     const prog=(pct,msg)=>{log.info(`[FarmTreeBrain] ${pct}% — ${msg}`);try{if(typeof this._onProgress==='function')this._onProgress(pct,msg);}catch{}};
     const yieldLoop=()=>new Promise(r=>setImmediate(r));
     try {
-      prog(3,'📚 Генерируем 500 000 сценариев (ходьба+ферма деревьев)...');
+      prog(3,'📚 Генерируем сценарии (ходьба+ферма деревьев)...');
       await yieldLoop();
       const all=buildSeedData();
-      prog(18,`✂️ Выбираем 200 000 из ${all.length.toLocaleString()}...`);
+      prog(18,`✂️ Выбираем 10 000 из ${all.length.toLocaleString()}...`);
       for(let i=all.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[all[i],all[j]]=[all[j],all[i]];}
-      const data=all.slice(0,Math.min(200000,all.length));
+      const data=all.slice(0,Math.min(10000,all.length));
       prog(22,`🌲 Обучаем нейросеть фермы деревьев (${data.length.toLocaleString()} сцен.)...`);
-      let iterDone=0;const TOTAL=600;
+      let iterDone=0;const TOTAL=300;
       await this.net.trainAsync(data,{
-        iterations:TOTAL,errorThresh:0.005,logPeriod:60,
-        log:(s)=>{iterDone+=60;prog(Math.min(22+Math.round((iterDone/TOTAL)*70),92),`⚡ Итерация ${iterDone}/${TOTAL}`);}
+        iterations:TOTAL,errorThresh:0.008,logPeriod:30,
+        log:(s)=>{iterDone+=30;prog(Math.min(22+Math.round((iterDone/TOTAL)*70),92),`⚡ Итерация ${iterDone}/${TOTAL}`);}
       });
       prog(95,'💾 Сохраняем веса...');
       try{fs.writeFileSync(WEIGHTS_PATH,JSON.stringify(this.net.toJSON()),"utf8");}catch{}
