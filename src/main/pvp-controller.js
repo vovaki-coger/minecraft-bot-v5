@@ -330,7 +330,7 @@ class PvpController {
       log.debug("[PvpController] tick error:", err.message);
     }
 
-    this._scheduleTick(this._target ? 80 : 400);
+    this._scheduleTick(this._target ? 150 : 400);
   }
 
   async _doMoveAndAttack(bot, dist) {
@@ -395,11 +395,16 @@ class PvpController {
       } else {
         // 3.5-8 блоков: смотрим на цель + прямой контроль
         this._log(`🏃 Спринт к цели dist=${dist.toFixed(2)}`);
-        // FIX: pitch=-0.3 было "смотреть вверх" — теперь прицел на тело цели (pitch≥0)
         const sprintPitch = Math.max(pitch, 0.05);
-        try { await bot.look(yaw, sprintPitch, false); } catch {}
+        // Вызываем look и setControlState только если изменились — иначе пакеты дублируются
+        const _nowMs2 = Date.now();
+        if (!this._lastSprintLookMs || (_nowMs2 - this._lastSprintLookMs) > 120) {
+          try { await bot.look(yaw, sprintPitch, false); } catch {}
+          this._lastSprintLookMs = _nowMs2;
+        }
         try { bot.pathfinder?.stop(); } catch {}
-        try { bot.setControlState('forward', true); bot.setControlState('sprint', true); } catch {}
+        if (!bot.controlState?.forward) { try { bot.setControlState('forward', true); } catch {} }
+        if (!bot.controlState?.sprint)  { try { bot.setControlState('sprint',  true); } catch {} }
       }
       return;
     }
@@ -424,11 +429,9 @@ class PvpController {
     // КД атаки — страфим пока ждём
     const _cdLeft = weaponCD - (Date.now() - this._lastAttackMs);
     if (_cdLeft > 0) {
-      // FIX: страфинг во время кулдауна — бот не стоит столбом
-      const _stDir = Math.floor(this._tickCount / 3) % 2 === 0;
-      try { bot.setControlState('left',  _stDir);  } catch {}
-      try { bot.setControlState('right', !_stDir); } catch {}
-      this._log(`⏳ КД оружия ${_cdLeft}мс — стрейф ${_stDir ? 'влево' : 'вправо'}`);
+      // Ждём кулдаун без стрейфа — стрейф спамит move-пакеты и вызывает
+      // "Invalid move player packet" / "Intensive server activity has been HALTED"
+      this._log(`⏳ КД оружия ${_cdLeft}мс — ждём`);
       return;
     }
     // CD готов — сбрасываем страфинг перед ударом

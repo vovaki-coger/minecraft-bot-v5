@@ -580,7 +580,9 @@ ${STAGE_GOALS[SURVIVOR_STAGES[this.currentStage]] || "Продолжай игр�
 
   async _actJumpAndMove(bot) {
     const yaw = Math.random() * Math.PI * 2;
-    bot.entity.yaw = yaw;
+    // FIX: bot.entity.yaw = yaw вызывало "Invalid move player packet" —
+    // прямое поле не отправляет пакет серверу. bot.look() отправляет корректный пакет.
+    try { await bot.look(yaw, 0, false); } catch {}
     bot.setControlState("jump", true);
     bot.setControlState("forward", true);
     await this._sleep(800);
