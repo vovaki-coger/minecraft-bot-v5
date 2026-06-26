@@ -1,6 +1,27 @@
 import React, { useState } from "react";
 import { BotState } from "../../store/appStore";
 
+interface PotionOption { id: string; label: string; emoji: string; ingredients: string[]; }
+
+const POTION_OPTIONS: PotionOption[] = [
+  { id: "strength_1",     label: "Сила I (3 мин)",             emoji: "⚔️", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Пыль визера × 3"] },
+  { id: "strength_2",     label: "Сила II (1.5 мин)",          emoji: "⚔️", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Пыль визера × 3", "Светокаменная пыль × 3"] },
+  { id: "speed_1",        label: "Скорость I (3 мин)",         emoji: "🏃", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Сахар × 3"] },
+  { id: "speed_2",        label: "Скорость II (1.5 мин)",      emoji: "🏃", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Сахар × 3", "Светокаменная пыль × 3"] },
+  { id: "fire_resistance",label: "Огнестойкость (4 мин)",      emoji: "🔥", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Магматический крем × 3"] },
+  { id: "invisibility",   label: "Невидимость (3 мин)",        emoji: "👁️", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Золотая морковь × 3", "Паучий глаз (фермент.) × 3"] },
+  { id: "leaping_1",      label: "Прыжок I (3 мин)",           emoji: "🐇", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Кроличья лапка × 3"] },
+  { id: "leaping_2",      label: "Прыжок II (1.5 мин)",        emoji: "🐇", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Кроличья лапка × 3", "Светокаменная пыль × 3"] },
+  { id: "water_breathing",label: "Водное дыхание (4 мин)",     emoji: "🐟", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Рыба-шар × 3"] },
+  { id: "night_vision",   label: "Ночное зрение (4 мин)",      emoji: "🌙", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Золотая морковь × 3"] },
+  { id: "regeneration_1", label: "Регенерация I (45 сек)",     emoji: "💚", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Слеза гаста × 3"] },
+  { id: "regeneration_2", label: "Регенерация II (22 сек)",    emoji: "💚", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Слеза гаста × 3", "Светокаменная пыль × 3"] },
+  { id: "healing_1",      label: "Лечение I (мгновенное)",     emoji: "❤️", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Блестящая дыня × 3"] },
+  { id: "healing_2",      label: "Лечение II (мгновенное)",    emoji: "❤️", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Блестящая дыня × 3", "Светокаменная пыль × 3"] },
+  { id: "poison_1",       label: "Отравление I (45 сек)",      emoji: "☠️", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Паучий глаз × 3"] },
+  { id: "slowness",       label: "Замедление (1.5 мин)",       emoji: "🐢", ingredients: ["Стержень визера (топливо)", "Адский гриб × 3 (основа)", "Сахар × 3", "Паучий глаз (фермент.) × 3"] },
+];
+
 const CROPS = [
   // Стандартные
   { id: "wheat_seeds",    name: "🌾 Пшеница",      type: "standard" },
@@ -47,7 +68,7 @@ const TYPE_LABEL: Record<string, string> = {
 interface Props { bot: BotState | null; }
 
 export default function FarmTab({ bot }: Props) {
-  const [activeMode, setActiveMode] = useState<"crops"|"quick"|"trees">("crops");
+  const [activeMode, setActiveMode] = useState<"crops"|"quick"|"trees"|"brewing">("crops");
 
   // Crops mode
   const [selectedCrop, setSelectedCrop] = useState("wheat_seeds");
@@ -65,6 +86,13 @@ export default function FarmTab({ bot }: Props) {
   const [treeSpacing, setTreeSpacing]         = useState(3);
   const [treeRadius, setTreeRadius]           = useState(20);
   const [treeRunning, setTreeRunning]         = useState(false);
+
+  // Brewing mode
+  const [selectedPotion, setSelectedPotion] = useState("strength_1");
+  const [wantSplash, setWantSplash]         = useState(false);
+  const [wantLong, setWantLong]             = useState(false);
+  const [brewRunning, setBrewRunning]       = useState(false);
+  const currentPotion = POTION_OPTIONS.find(p => p.id === selectedPotion) || POTION_OPTIONS[0];
 
   const [loading, setLoading] = useState<string | null>(null);
   const isOnline = bot?.status === "online";
@@ -125,9 +153,29 @@ export default function FarmTab({ bot }: Props) {
     setTreeRunning(false);
   }
 
-  const isAnyRunning = farmRunning || quickRunning || treeRunning;
+  async function startBrew() {
+    if (!bot) return; setLoading("brew");
+    try {
+      await (window.electronAPI?.bot as any).startAnarchy(bot.id, {
+        task: "brew_potions",
+        potionId: selectedPotion,
+        wantSplash,
+        wantLong,
+        homeCommand: "/home",
+      });
+      setBrewRunning(true);
+    } catch (e: any) { alert(e.message); }
+    setLoading(null);
+  }
+  async function stopBrew() {
+    if (!bot) return;
+    await (window.electronAPI?.bot as any).stopAnarchy(bot.id);
+    setBrewRunning(false);
+  }
 
-  const modeBtn = (id: "crops"|"quick"|"trees", label: string) => (
+  const isAnyRunning = farmRunning || quickRunning || treeRunning || brewRunning;
+
+  const modeBtn = (id: "crops"|"quick"|"trees"|"brewing", label: string) => (
     <button
       onClick={() => setActiveMode(id)}
       style={{
@@ -150,9 +198,10 @@ export default function FarmTab({ bot }: Props) {
 
       {/* Режим */}
       <div className="flex gap-1 p-0.5" style={{ background: "rgba(255,255,255,0.02)", borderRadius: 6, border: "1px solid #1a2540" }}>
-        {modeBtn("crops", "🌾 Культуры")}
-        {modeBtn("quick", "⚡ Быстрый")}
-        {modeBtn("trees", "🌳 Деревья")}
+        {modeBtn("crops",   "🌾 Культуры")}
+        {modeBtn("quick",   "⚡ Быстрый")}
+        {modeBtn("trees",   "🌳 Деревья")}
+        {modeBtn("brewing", "🧪 Зелья")}
       </div>
 
       {/* ── КУЛЬТУРЫ ─────────────────────────────────────────────────── */}
@@ -334,6 +383,90 @@ export default function FarmTab({ bot }: Props) {
           {treeRunning && (
             <div className="text-xs text-center" style={{ color: "#2ecc71", animation: "pulse 2s infinite" }}>
               🌳 Сажаю и рублю деревья...
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ЗЕЛЬЯ ────────────────────────────────────────────────────── */}
+      {activeMode === "brewing" && (
+        <div className="panel p-3 flex flex-col gap-2" style={{ border: "1px solid #3d1f5a" }}>
+          <div className="text-xs font-mono font-bold" style={{ color: "#cc88ff" }}>🧪 Зельеварение</div>
+          <div className="text-xs" style={{ color: "#666" }}>
+            Бот сам найдёт стойку и сундук в радиусе 32 блоков, сварит выбранное зелье
+          </div>
+
+          {/* Выбор зелья */}
+          <div>
+            <label className="text-xs mb-1 block" style={{ color: "#aaa" }}>Зелье:</label>
+            <select
+              value={selectedPotion}
+              onChange={e => setSelectedPotion(e.target.value)}
+              disabled={brewRunning}
+              className="w-full text-xs p-2 rounded"
+              style={{ background: "#1a1a2a", border: "1px solid #3d1f5a", color: brewRunning ? "#555" : "#e8e8e8", fontFamily: "monospace", outline: "none" }}
+            >
+              {POTION_OPTIONS.map(p => (
+                <option key={p.id} value={p.id}>{p.emoji} {p.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Опции */}
+          <div className="flex gap-4">
+            <label className="flex items-center gap-1.5 cursor-pointer" style={{ opacity: brewRunning ? 0.4 : 1 }}>
+              <input type="checkbox" checked={wantSplash} onChange={e => !brewRunning && setWantSplash(e.target.checked)}
+                disabled={brewRunning} style={{ accentColor: "#9b59b6" }} />
+              <span className="text-xs" style={{ color: "#cc88ff" }}>Сплеш (бросаемое)</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer" style={{ opacity: brewRunning ? 0.4 : 1 }}>
+              <input type="checkbox" checked={wantLong} onChange={e => !brewRunning && setWantLong(e.target.checked)}
+                disabled={brewRunning} style={{ accentColor: "#3498db" }} />
+              <span className="text-xs" style={{ color: "#5dade2" }}>Redstone (8 мин)</span>
+            </label>
+          </div>
+
+          {/* Ингредиенты */}
+          <div style={{ background: "#0d0d1a", border: "1px solid #2a1a3a", borderRadius: 4, padding: "8px 10px" }}>
+            <div className="text-xs mb-1 font-mono" style={{ color: "#888" }}>Нужно в инвентаре / сундуке:</div>
+            <div className="flex flex-col gap-0.5">
+              {currentPotion.ingredients.map((ing, i) => (
+                <div key={i} className="text-xs flex items-start gap-1" style={{ color: "#aaa" }}>
+                  <span style={{ color: "#9b59b6", flexShrink: 0 }}>•</span>
+                  <span>{ing}</span>
+                </div>
+              ))}
+              {wantSplash && (
+                <div className="text-xs flex items-start gap-1" style={{ color: "#aaa" }}>
+                  <span style={{ color: "#e67e22", flexShrink: 0 }}>•</span>
+                  <span>Порох × 3 (для Сплеш)</span>
+                </div>
+              )}
+              {wantLong && (
+                <div className="text-xs flex items-start gap-1" style={{ color: "#5dade2" }}>
+                  <span style={{ color: "#3498db", flexShrink: 0 }}>•</span>
+                  <span>Красный камень × 3 (для 8 мин)</span>
+                </div>
+              )}
+              <div className="text-xs flex items-start gap-1 mt-1" style={{ color: "#666" }}>
+                <span style={{ color: "#555", flexShrink: 0 }}>•</span>
+                <span>Стеклянные флаконы × 3 (Glass Bottle)</span>
+              </div>
+            </div>
+          </div>
+
+          <button
+            className="btn text-xs w-full mt-1"
+            onClick={brewRunning ? stopBrew : startBrew}
+            disabled={offline || loading === "brew"}
+            style={brewRunning
+              ? { background: "#2a0a0a", borderColor: "#e74c3c", color: "#e74c3c" }
+              : { background: "#1a0d2a", borderColor: "#8e44ad", color: "#cc88ff" }}>
+            {loading === "brew" ? "⏳..." : brewRunning ? "⏹ Остановить зельеварение" : "🧪 Запустить зельеварение"}
+          </button>
+          {brewRunning && (
+            <div className="text-xs text-center" style={{ color: "#cc88ff", animation: "pulse 2s infinite" }}>
+              🧪 Варю зелья...
             </div>
           )}
         </div>
