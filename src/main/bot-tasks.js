@@ -133,9 +133,12 @@ class TaskManager {
       await this._eatIfHungry();
       await this._gotoNearest(block.position, 2);
       if (!this._running) break;
-      await this._equipBestTool(block);
-      await this.bot.lookAt(block.position.offset(0.5,0.5,0.5),true).catch(()=>{});
-      await this.bot.dig(block).catch(() => {});
+      // Перечитываем блок — за время пути он мог быть сломан кем-то
+      const freshBlock = this.bot.blockAt(block.position);
+      if (!freshBlock || freshBlock.type === 0 || freshBlock.name !== block.name) continue;
+      await this._equipBestTool(freshBlock);
+      await this.bot.lookAt(freshBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
+      await this.bot.dig(freshBlock).catch(() => {});
       collected++;
       if (collected % 5 === 0) this._log("Собрано " + collected + "/" + count + " бревён");
     }
@@ -153,8 +156,12 @@ class TaskManager {
       await this._eatIfHungry();
       await this._gotoNearest(block.position, 2);
       if (!this._running) break;
-      await this.bot.lookAt(block.position.offset(0.5,0.5,0.5),true).catch(()=>{});
-      await this.bot.dig(block).catch(() => {});
+      // Перечитываем блок — за время пути он мог быть сломан
+      const freshBlk = this.bot.blockAt(block.position);
+      if (!freshBlk || freshBlk.type === 0) continue;
+      await this._equipBestTool(freshBlk);
+      await this.bot.lookAt(freshBlk.position.offset(0.5,0.5,0.5),true).catch(()=>{});
+      await this.bot.dig(freshBlk).catch(() => {});
       collected++;
     }
     this._chat("Добыл " + collected + " " + blockName);
@@ -665,9 +672,11 @@ class TaskManager {
         await this._eatIfHungry();
         await this._gotoNearest(logBlock.position, 2);
         if (!this._running) break;
-        await this._equipBestTool(logBlock);
-        await this.bot.lookAt(logBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
-        await this.bot.dig(logBlock).catch(() => {});
+        const freshLog = this.bot.blockAt(logBlock.position);
+        if (!freshLog || freshLog.type === 0) continue;
+        await this._equipBestTool(freshLog);
+        await this.bot.lookAt(freshLog.position.offset(0.5,0.5,0.5),true).catch(()=>{});
+        await this.bot.dig(freshLog).catch(() => {});
         await this._sleep(80);
         chopped++;
       }
@@ -772,9 +781,6 @@ class TaskManager {
 
       const myHp = this.bot.health ?? 20;
       const dist = target.position.distanceTo(this.bot.entity.position);
-
-      // ── Еда при голоде ────────────────────────────────────────────────────
-      await this._eatIfHungry();
 
       // ── Еда при голоде ────────────────────────────────────────────────────
       await this._eatIfHungry();
@@ -1022,7 +1028,6 @@ class TaskManager {
           const b2 = this.bot.blockAt(new Vec3(x, y, z));
           if (!b2 || SKIP.has(b2.name) || !b2.diggable) { skipped++; continue; }
 
-          await this._eatIfHungry();
           await this._eatIfHungry();
           try {
             await this._equipBestTool(b2);
