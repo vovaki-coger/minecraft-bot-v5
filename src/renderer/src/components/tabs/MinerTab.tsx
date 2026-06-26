@@ -12,6 +12,9 @@ export default function MinerTab() {
   const [progress, setProgress] = useState<{dug:number;total:number;msg:string}|null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const [brainTraining, setBrainTraining] = useState(false);
+  const [brainPct, setBrainPct] = useState(0);
+  const [brainMsg, setBrainMsg] = useState("Загрузка...");
 
   const isOnline = bot?.status === "online";
 
@@ -28,6 +31,17 @@ export default function MinerTab() {
         setRunning(false);
         setProgress(null);
         setLogs(prev => [...prev, `✅ Готово! Выкопано: ${d.dug}, пропущено: ${d.skipped}`]);
+      }),
+      window.electronAPI.on("bot:minerBrainTraining", (d: any) => {
+        if (d?.botId !== bot?.id) return;
+        setBrainTraining(true);
+        setBrainPct(d.pct ?? 0);
+        setBrainMsg(d.msg ?? "Обучение...");
+      }),
+      window.electronAPI.on("bot:minerBrainReady", (d: any) => {
+        if (d?.botId !== bot?.id) return;
+        setBrainTraining(false);
+        setBrainPct(100);
       }),
     ];
     return () => unsubs.forEach(fn => fn?.());
@@ -85,7 +99,51 @@ export default function MinerTab() {
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden p-3 gap-3">
+    <div className="flex flex-col h-full overflow-hidden p-3 gap-3" style={{ position: "relative" }}>
+
+      {/* ── ОВЕРЛЕЙ ОБУЧЕНИЯ MINER-МОЗГА ──────────────────────────────── */}
+      {brainTraining && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 50,
+          background: "rgba(8,10,16,0.96)",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          gap: 18, borderRadius: 8,
+          backdropFilter: "blur(6px)",
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: "50%",
+            border: "3px solid rgba(230,126,34,0.15)",
+            borderTopColor: "#e67e22",
+            animation: "spin 0.9s linear infinite",
+          }} />
+          <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: 13, fontFamily: "monospace", color: "#e67e22", fontWeight: "bold", textShadow: "0 0 12px rgba(230,126,34,0.5)" }}>
+              ⛏ Майнер: обучение нейросети
+            </div>
+            <div style={{ fontSize: 11, fontFamily: "monospace", color: "#6a4a20", maxWidth: 260, lineHeight: 1.5 }}>
+              {brainMsg}
+            </div>
+          </div>
+          <div style={{ width: 220 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, fontFamily: "monospace", color: "#5a4a30", marginBottom: 6 }}>
+              <span>Прогресс</span>
+              <span style={{ color: "#e67e22" }}>{Math.round(brainPct)}%</span>
+            </div>
+            <div style={{ height: 6, background: "rgba(230,126,34,0.1)", borderRadius: 3, overflow: "hidden", border: "1px solid rgba(230,126,34,0.2)" }}>
+              <div style={{
+                height: "100%", borderRadius: 3, transition: "width 0.4s ease",
+                width: `${brainPct}%`,
+                background: "linear-gradient(90deg, #8a4010, #e67e22)",
+                boxShadow: "0 0 8px rgba(230,126,34,0.4)",
+              }} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, fontFamily: "monospace", color: "#3a2a10" }}>
+            Первый запуск — обучается один раз, затем мгновенно
+          </div>
+        </div>
+      )}
       <div className="text-xs font-mono font-bold" style={{ color: "#e67e22" }}>
         ⛏ Шахтёр — раскопка территории
       </div>
