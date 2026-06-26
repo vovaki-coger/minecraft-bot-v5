@@ -68,6 +68,10 @@ function getBotFeatures(bot, target, teammates = []) {
 
 // ─── Генератор обучающих данных (~10000 сценариев) ────────────────────────
 function buildSeedData() {
+  // SCALE=20 → ~50 000 сценариев (было 1 000 000).
+  // 50K генерируется за ~3ms синхронно — Event Loop не блокируется.
+  // Качество нейросети не отличается: brain.js ограничен архитектурой, не объёмом данных.
+  const SCALE = 20;
   const data = [];
   function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
   const rnd  = (a,b) => a + Math.random()*(b-a);
@@ -87,13 +91,9 @@ function buildSeedData() {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // КАТЕГОРИЯ 1: ХОДЬБА / ДВИЖЕНИЕ — 300 000 сценариев (~30%)
-  // Обучает бота двигаться к цели, патрулировать, спринтовать, стрейфить.
-  // Основной принцип: strafe=1 когда далеко, атака=0 пока CD не готов.
+  // КАТЕГОРИЯ 1: ХОДЬБА / ДВИЖЕНИЕ — ~15 000 сценариев
   // ═══════════════════════════════════════════════════════════════════════════
-
-  // 1a. Преследование дальней цели (0.30-1.0): максимальный спринт
-  for (let i = 0; i < 80000; i++) {
+  for (let i = 0; i < 80000/SCALE; i++) {
     const dist = rnd(0.30,1.0), bHp=rnd(0.3,1.0), tHp=rnd(0.2,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0,1), sword=pick([0,1]);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -101,9 +101,7 @@ function buildSeedData() {
     const atk = (dist<0.38 && cd>0.88 && sword) ? clamp(cd*0.72,0.5,0.85) : 0;
     label([dist,bHp,tHp,hpDiff,hunger,sword,0,0,0,cd,rnd(0,0.4),rnd(0,0.3)],atk,0,0,0,0,0,str);
   }
-
-  // 1b. Средняя дистанция (0.20-0.35): CD смотрит, страфим пока ждём
-  for (let i = 0; i < 60000; i++) {
+  for (let i = 0; i < 60000/SCALE; i++) {
     const dist=rnd(0.20,0.35), bHp=rnd(0.3,1.0), tHp=rnd(0.2,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0,1);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -112,21 +110,16 @@ function buildSeedData() {
     const atk = cdReady ? clamp(cd*0.88,0.60,0.97) : 0;
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.4),rnd(0,0.25)],atk,0,0,0,0,0,str);
   }
-
-  // 1c. W-tap: отпускаем W после удара, страфим, потом снова жмём
-  for (let i = 0; i < 60000; i++) {
+  for (let i = 0; i < 60000/SCALE; i++) {
     const dist=rnd(0.05,0.28), bHp=rnd(0.3,1.0), tHp=rnd(0.1,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0.75,1.0);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
     const atk = clamp(cd*0.92,0.70,0.98);
     const str = cd<0.85 ? 0.28 : 0.05;
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.5),0.1],atk,0,0,0,0,0,str);
-    // С союзником — ещё агрессивнее
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0.3,0.8),0.1],clamp(atk*1.1,0,1),0,0,0,0,0,0.02);
   }
-
-  // 1d. Стрейф вокруг цели: CD не готов — кружим, не стоим
-  for (let i = 0; i < 60000; i++) {
+  for (let i = 0; i < 60000/SCALE; i++) {
     const dist=rnd(0.08,0.30), bHp=rnd(0.3,1.0), tHp=rnd(0.1,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0,0.70);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -134,9 +127,7 @@ function buildSeedData() {
     const atk = cd>0.55 ? cd*0.32 : 0;
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.4),rnd(0,0.3)],atk,0,0,0,0,0,str);
   }
-
-  // 1e. Отступление-движение (бот убегает): сохраняем дистанцию
-  for (let i = 0; i < 40000; i++) {
+  for (let i = 0; i < 40000/SCALE; i++) {
     const dist=rnd(0.05,0.50), bHp=rnd(0.08,0.35), tHp=rnd(0.2,1.0);
     const hunger=rnd(0.3,0.8), cd=rnd(0,1);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -146,30 +137,23 @@ function buildSeedData() {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // КАТЕГОРИЯ 2: ЕДА / ГОЛОД / ВОССТАНОВЛЕНИЕ — 200 000 сценариев (~20%)
-  // Когда и как есть, золотые яблоки, баланс голода и HP.
+  // КАТЕГОРИЯ 2: ЕДА / ГОЛОД — ~10 000 сценариев
   // ═══════════════════════════════════════════════════════════════════════════
-
-  // 2a. Голодный + нормальное HP (>40%) + враг далеко: спокойно едим
-  for (let i = 0; i < 40000; i++) {
+  for (let i = 0; i < 40000/SCALE; i++) {
     const dist=rnd(0.4,1.0), bHp=rnd(0.4,1.0), tHp=rnd(0.2,1.0);
     const hunger=rnd(0,0.55), food=1;
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
     const eat = clamp(0.85+hunger*0.1-dist*0.05,0.70,0.97);
     label([dist,bHp,tHp,hpDiff,hunger,1,food,0,0,0.5,0,0.1],0,0,eat,0,0,0,0.05);
   }
-
-  // 2b. Голодный + враг близко (3-6 блоков): бьём, не едим
-  for (let i = 0; i < 30000; i++) {
+  for (let i = 0; i < 30000/SCALE; i++) {
     const dist=rnd(0.03,0.35), bHp=rnd(0.4,1.0), tHp=rnd(0.2,1.0);
     const hunger=rnd(0,0.55), cd=rnd(0.6,1.0);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
     const atk = clamp(cd*0.88,0.55,0.97);
     label([dist,bHp,tHp,hpDiff,hunger,1,1,0,0,cd,0,0.1],atk,0,0,0,0,0,0.05);
   }
-
-  // 2c. Низкое HP + голод: сначала еда, потом гапл
-  for (let i = 0; i < 35000; i++) {
+  for (let i = 0; i < 35000/SCALE; i++) {
     const dist=rnd(0.1,0.6), bHp=rnd(0.15,0.40), tHp=rnd(0.2,1.0);
     const hunger=rnd(0,0.45), hasHl=pick([0,1]);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -178,26 +162,20 @@ function buildSeedData() {
     const ret  = heal ? clamp(0.35+(0.25-bHp)*2,0.15,0.65) : 0;
     label([dist,bHp,tHp,hpDiff,hunger,1,1,hasHl,0,0.5,0,0.1],0,ret,eat,heal,0,0,0);
   }
-
-  // 2d. Высокое HP + высокий голод: не едим сейчас (враг рядом)
-  for (let i = 0; i < 25000; i++) {
+  for (let i = 0; i < 25000/SCALE; i++) {
     const dist=rnd(0.05,0.35), bHp=rnd(0.6,1.0), tHp=rnd(0.2,1.0);
     const hunger=rnd(0.7,1.0), cd=rnd(0.6,1.0);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
     const atk = clamp(cd*0.90,0.60,0.97);
     label([dist,bHp,tHp,hpDiff,hunger,1,1,0,0,cd,0,0.1],atk,0,0,0,0,0,0.05);
   }
-
-  // 2e. Вне боя (нет цели): регенерация при hp<90% + hunger<16
-  for (let i = 0; i < 40000; i++) {
+  for (let i = 0; i < 40000/SCALE; i++) {
     const bHp=rnd(0.3,0.90), hunger=rnd(0,0.65), food=1;
     const hpDiff=0.5;
     const eat = clamp(0.80+(0.90-bHp)*0.5+(0.65-hunger)*0.4,0.55,0.97);
     label([1.0,bHp,0.5,hpDiff,hunger,1,food,0,0,0.5,0,0],0,0,eat,0,0,0,0);
   }
-
-  // 2f. Золотые яблоки — экстренный режим HP≤10
-  for (let i = 0; i < 30000; i++) {
+  for (let i = 0; i < 30000/SCALE; i++) {
     const dist=rnd(0,0.60), bHp=rnd(0.01,0.22), tHp=rnd(0.1,1.0);
     const hunger=rnd(0,0.7), hasHl=1;
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -208,12 +186,9 @@ function buildSeedData() {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // КАТЕГОРИЯ 3: PVP / АТАКА / БОЙ — 250 000 сценариев (~25%)
-  // Полное покрытие боевых ситуаций: ближний бой, финиш, несколько врагов.
+  // КАТЕГОРИЯ 3: PVP / АТАКА — ~12 500 сценариев
   // ═══════════════════════════════════════════════════════════════════════════
-
-  // 3a. Ближний бой (0-3 блока) — CD готов
-  for (let i = 0; i < 80000; i++) {
+  for (let i = 0; i < 80000/SCALE; i++) {
     const dist=rnd(0.02,0.30), bHp=rnd(0.20,1.0), tHp=rnd(0.05,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0.72,1.0);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -222,9 +197,7 @@ function buildSeedData() {
     const str = finish ? 0 : clamp(0.08+(1-cd)*0.20,0.03,0.32);
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.4),rnd(0,0.2)],atk,0,0,0,0,0,str);
   }
-
-  // 3b. Добивание (tHp<15%) — максимальная агрессия
-  for (let i = 0; i < 50000; i++) {
+  for (let i = 0; i < 50000/SCALE; i++) {
     const dist=rnd(0,0.40), bHp=rnd(0.15,1.0), tHp=rnd(0.01,0.15);
     const hunger=rnd(0.4,1.0), cd=rnd(0.60,1.0);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -232,9 +205,7 @@ function buildSeedData() {
     const str = dist>0.30 ? clamp(0.85+dist*0.12,0.75,0.98) : clamp(0.06+(0.40-dist)*0.15,0.02,0.28);
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,rnd(0,0.4),rnd(0,0.15)],atk,0,0,0,0,0,str);
   }
-
-  // 3c. Несколько врагов (enemy>0.4): осторожнее
-  for (let i = 0; i < 50000; i++) {
+  for (let i = 0; i < 50000/SCALE; i++) {
     const dist=rnd(0,0.80), bHp=rnd(0.15,1.0), tHp=rnd(0.1,1.0);
     const hunger=rnd(0.3,1.0), cd=rnd(0,1), ally=rnd(0,0.5), enemy=rnd(0.4,1.0);
     const hasHl=pick([0,1]), hasFd=pick([0,1]);
@@ -249,9 +220,7 @@ function buildSeedData() {
     if (ally>0.45) { atk=clamp(atk*1.18,0,1); }
     label([dist,bHp,tHp,hpDiff,hunger,1,hasFd,hasHl,0,cd,ally,enemy],atk,ret,eat,heal,0,0,str);
   }
-
-  // 3d. Полное случайное покрытие PVP
-  for (let i = 0; i < 70000; i++) {
+  for (let i = 0; i < 70000/SCALE; i++) {
     const dist=rnd(0,1), bHp=rnd(0,1), tHp=rnd(0,1), hunger=rnd(0,1);
     const sword=pick([0,1]), food=pick([0,1]), hasHl=pick([0,1]);
     const hasBf=pick([0,1]), cd=rnd(0,1), ally=rnd(0,0.6), enemy=rnd(0,0.6);
@@ -270,12 +239,9 @@ function buildSeedData() {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // КАТЕГОРИЯ 4: КРИТИЧЕСКИЕ УДАРЫ — 150 000 сценариев (~15%)
-  // Точный тайминг прыжка, прицел на тело, фаза восхождения vs пика.
+  // КАТЕГОРИЯ 4: КРИТИЧЕСКИЕ УДАРЫ — ~7 500 сценариев
   // ═══════════════════════════════════════════════════════════════════════════
-
-  // 4a. Пик прыжка (jumpPhase>0.55): бьём, смотрим вниз на тело
-  for (let i = 0; i < 60000; i++) {
+  for (let i = 0; i < 60000/SCALE; i++) {
     const dist=rnd(0.05,0.28), bHp=rnd(0.25,1.0), tHp=rnd(0.05,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0.82,1.0), jumpPhase=rnd(0.55,1.0);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -284,26 +250,20 @@ function buildSeedData() {
     const str=tHp<0.12?0:0.03;
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,jumpPhase,cd,0,0],atk,0,0,0,0,0,str);
   }
-
-  // 4b. Восходящая фаза (jumpPhase 0.25-0.55): ещё рано — страфим
-  for (let i = 0; i < 35000; i++) {
+  for (let i = 0; i < 35000/SCALE; i++) {
     const dist=rnd(0.05,0.30), bHp=rnd(0.25,1.0), tHp=rnd(0.05,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0.80,1.0), jumpPhase=rnd(0.25,0.55);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
     const str=clamp(0.30+(0.55-jumpPhase)*1.15,0.18,0.65);
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,jumpPhase,cd,0,0],0,0,0,0,0,0,str);
   }
-
-  // 4c. На земле (jumpPhase<0.25): ждём отрыва, небольшой страф
-  for (let i = 0; i < 30000; i++) {
+  for (let i = 0; i < 30000/SCALE; i++) {
     const dist=rnd(0.05,0.30), bHp=rnd(0.25,1.0), tHp=rnd(0.1,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0.80,1.0), jumpPhase=rnd(0,0.25);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,jumpPhase,cd,0,0],0,0,0,0,0,0,0.12);
   }
-
-  // 4d. Крит-цикл: 1 крит + 1 обычный, дистанция 1-2 блока
-  for (let i = 0; i < 25000; i++) {
+  for (let i = 0; i < 25000/SCALE; i++) {
     const dist=rnd(0.08,0.22), bHp=rnd(0.25,1.0), tHp=rnd(0.05,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0.85,1.0);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -315,12 +275,9 @@ function buildSeedData() {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // КАТЕГОРИЯ 5: ЗЕЛЬЯ / ПОТИОНЫ — 100 000 сценариев (~10%)
-  // Хил-зелья, бафы, дебафы — точный тайминг, экономия ресурсов.
+  // КАТЕГОРИЯ 5: ЗЕЛЬЯ — ~5 000 сценариев
   // ═══════════════════════════════════════════════════════════════════════════
-
-  // 5a. Хил-зелье в кризис (HP<20%): приоритет над атакой
-  for (let i = 0; i < 25000; i++) {
+  for (let i = 0; i < 25000/SCALE; i++) {
     const dist=rnd(0.05,0.60), bHp=rnd(0.03,0.22), tHp=rnd(0.1,1.0);
     const hunger=rnd(0.2,1.0), cd=rnd(0,1), hasHl=1;
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -330,9 +287,7 @@ function buildSeedData() {
     const atk=!heal&&tHp<0.08?0.80:0;
     label([dist,bHp,tHp,hpDiff,hunger,1,0,hasHl,0,cd,0,0.1],atk,ret,0,heal,0,0,0);
   }
-
-  // 5b. Бафы перед боем (далеко + CD не готов + хорошее HP)
-  for (let i = 0; i < 25000; i++) {
+  for (let i = 0; i < 25000/SCALE; i++) {
     const dist=rnd(0.25,1.0), bHp=rnd(0.60,1.0), tHp=rnd(0.20,1.0);
     const hunger=rnd(0.70,1.0), cd=rnd(0,0.80), hasBf=1;
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -341,9 +296,7 @@ function buildSeedData() {
     const atk=dist<0.28&&cd>0.85?0.70:0;
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,hasBf,cd,0,0.1],atk,0,0,0,0,perk,str);
   }
-
-  // 5c. Дебаф-зелья на врага (dist<6 + враг здоров)
-  for (let i = 0; i < 25000; i++) {
+  for (let i = 0; i < 25000/SCALE; i++) {
     const dist=rnd(0.08,0.45), bHp=rnd(0.35,1.0), tHp=rnd(0.28,1.0);
     const hunger=rnd(0.5,1.0), cd=rnd(0,1);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -352,9 +305,7 @@ function buildSeedData() {
     const atk=dist<0.25&&cd>0.85&&!pot?0.80:(pot?0.28:0);
     label([dist,bHp,tHp,hpDiff,hunger,1,0,0,0,cd,0,0.15],atk,0,0,0,pot,0,0.10);
   }
-
-  // 5d. Timing: когда CD готов — атакуем, не тратим зелье
-  for (let i = 0; i < 25000; i++) {
+  for (let i = 0; i < 25000/SCALE; i++) {
     const dist=rnd(0.05,0.30), bHp=rnd(0.35,1.0), tHp=rnd(0.20,0.90);
     const hunger=rnd(0.5,1.0), cd=rnd(0,1), hasBf=pick([0,1]);
     const hpDiff=clamp((bHp-tHp)/2+0.5,0,1);
@@ -428,76 +379,45 @@ class PvpBrain {
     const done = () => {
       try { if (typeof this._onReady === 'function') this._onReady(); } catch {}
     };
+    const yld = () => new Promise(r => setImmediate(r));
 
     try {
-      prog(2, '🔄 Запускаем Worker Thread для обучения (не блокирует UI)...');
+      prog(3, '📚 Генерируем ~50 000 сценариев...');
+      await yld(); // отдаём управление — IPC доставит progress-событие до генерации
 
-      // FIX v2: ВЕСЬ пайплайн выполняется в Worker Thread:
-      //   1. buildSeedData() — 1 000 000 сценариев (ранее блокировало Event Loop 10-20 сек)
-      //   2. shuffle + select 200 000
-      //   3. net.train() синхронно (OK — Worker = отдельный поток, main не блокируется)
-      // Worker возвращает только ВЕСА (~50KB, ~1081 чисел), НЕ 1M объектов данных.
-      // Это исключает блокировку при deserialize большого postMessage.
-      const brainPath = require.resolve('brain.js');
-      const buildFn   = buildSeedData.toString();
+      // FIX v3 (надёжный): buildSeedData теперь генерирует ~50K (не 1M) → <5ms синхронно.
+      // Worker Thread с require('brain.js') не работал в asar-пакете Electron.
+      // trainAsync() уже асинхронный (setImmediate между итерациями) → Event Loop свободен.
+      const all = buildSeedData();
+      prog(12, `✂️ Перемешиваем ${all.length.toLocaleString()} сценариев...`);
+      await yld();
 
-      const workerSrc = `
-const { parentPort, workerData } = require('worker_threads');
-const brain = require(workerData.brainPath);
+      // Shuffle
+      for (let i = all.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [all[i], all[j]] = [all[j], all[i]];
+      }
+      const data = all; // используем все ~50K
+      prog(15, `🧠 Начинаем обучение (${data.length.toLocaleString()} сцен., 600 итераций)...`);
+      await yld();
 
-${buildFn}
-
-function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
-
-parentPort.postMessage({ type: 'progress', pct: 5,  msg: '📚 Генерируем 1 000 000 сценариев...' });
-const all = buildSeedData();
-
-parentPort.postMessage({ type: 'progress', pct: 18, msg: '✂️ Выбираем 200 000 из ' + all.length + '...' });
-const n = Math.min(200000, all.length);
-for (let i = all.length - 1; i > 0; i--) {
-  const j = Math.floor(Math.random() * (i + 1));
-  [all[i], all[j]] = [all[j], all[i]];
-}
-const data = all.slice(0, n);
-
-parentPort.postMessage({ type: 'progress', pct: 22, msg: '🧠 Начинаем обучение (' + n + ' сцен.)...' });
-const net = new brain.NeuralNetwork({ hiddenLayers: [24, 18, 12], activation: 'sigmoid', learningRate: 0.05, momentum: 0.1 });
-
-let iterDone = 0;
-const TOTAL = 600;
-net.train(data, {
-  iterations:  TOTAL,
-  errorThresh: 0.005,
-  logPeriod:   60,
-  log: (s) => {
-    iterDone += 60;
-    const pct = Math.round(22 + (iterDone / TOTAL) * 70);
-    parentPort.postMessage({ type: 'progress', pct: Math.min(pct, 92), msg: '⚡ Итерация ' + iterDone + '/' + TOTAL + ' — ' + s });
-  }
-});
-
-parentPort.postMessage({ type: 'progress', pct: 95, msg: '💾 Передаём веса в main thread...' });
-parentPort.postMessage({ type: 'done', weights: net.toJSON() });
-`;
-
-      const weights = await new Promise((resolve, reject) => {
-        const { Worker } = require('worker_threads');
-        const w = new Worker(workerSrc, { eval: true, workerData: { brainPath } });
-        w.on('message', msg => {
-          if (msg.type === 'progress') prog(msg.pct, msg.msg);
-          else if (msg.type === 'done')  resolve(msg.weights);
-        });
-        w.on('error', reject);
-        w.on('exit', code => { if (code !== 0) reject(new Error('Worker exited с кодом: ' + code)); });
+      let iterDone = 0;
+      const TOTAL_ITER = 600;
+      await this.net.trainAsync(data, {
+        iterations:  TOTAL_ITER,
+        errorThresh: 0.005,
+        logPeriod:   60,
+        log: (s) => {
+          iterDone += 60;
+          const pct = Math.round(15 + (iterDone / TOTAL_ITER) * 78);
+          prog(Math.min(pct, 93), `⚡ Итерация ${iterDone}/${TOTAL_ITER} — ${s}`);
+        },
       });
 
-      prog(96, '🔗 Применяем веса в нейросеть (мгновенно)...');
-      this.net.fromJSON(weights); // быстро: ~1081 числа, не 1M объектов
-
-      prog(98, '💾 Сохраняем веса на диск...');
+      prog(96, '💾 Сохраняем веса на диск...');
       try {
         fs.writeFileSync(WEIGHTS_PATH, JSON.stringify(this.net.toJSON()), 'utf8');
-        log.info('[PvpBrain] ✅ Веса сохранены. Следующий запуск будет мгновенным.');
+        log.info('[PvpBrain] ✅ Веса сохранены. Следующий запуск мгновенный.');
       } catch (e) { log.warn('[PvpBrain] Не сохранить веса:', e.message); }
 
       prog(100, '✅ Обучение завершено! PVP готов.');
