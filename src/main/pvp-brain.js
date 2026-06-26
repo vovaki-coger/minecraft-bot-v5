@@ -428,65 +428,88 @@ class PvpBrain {
     const done = () => {
       try { if (typeof this._onReady === 'function') this._onReady(); } catch {}
     };
-    // Yield Event Loop один раз — чтобы IPC-сообщение pct=3 успело уйти в renderer
-    // ДО того как buildSeedData() заблокирует Event Loop на ~10-20 сек
-    const yieldLoop = () => new Promise(r => setImmediate(r));
 
     try {
-      prog(3, '📚 Генерируем 1 000 000 сценариев (5 категорий)...');
-      await yieldLoop(); // ← даём IPC доставить сообщение до блокировки
-      // FIX white-screen: buildSeedData() блокировал Event Loop на 10-20 сек (1M сценариев).
-      // Worker Thread — main process остаётся отзывчивым, IPC не зависает → белый экран исчезает.
-      const all = await new Promise((resolve, reject) => {
+      prog(2, '🔄 Запускаем Worker Thread для обучения (не блокирует UI)...');
+
+      // FIX v2: ВЕСЬ пайплайн выполняется в Worker Thread:
+      //   1. buildSeedData() — 1 000 000 сценариев (ранее блокировало Event Loop 10-20 сек)
+      //   2. shuffle + select 200 000
+      //   3. net.train() синхронно (OK — Worker = отдельный поток, main не блокируется)
+      // Worker возвращает только ВЕСА (~50KB, ~1081 чисел), НЕ 1M объектов данных.
+      // Это исключает блокировку при deserialize большого postMessage.
+      const brainPath = require.resolve('brain.js');
+      const buildFn   = buildSeedData.toString();
+
+      const workerSrc = `
+const { parentPort, workerData } = require('worker_threads');
+const brain = require(workerData.brainPath);
+
+${buildFn}
+
+function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
+
+parentPort.postMessage({ type: 'progress', pct: 5,  msg: '📚 Генерируем 1 000 000 сценариев...' });
+const all = buildSeedData();
+
+parentPort.postMessage({ type: 'progress', pct: 18, msg: '✂️ Выбираем 200 000 из ' + all.length + '...' });
+const n = Math.min(200000, all.length);
+for (let i = all.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [all[i], all[j]] = [all[j], all[i]];
+}
+const data = all.slice(0, n);
+
+parentPort.postMessage({ type: 'progress', pct: 22, msg: '🧠 Начинаем обучение (' + n + ' сцен.)...' });
+const net = new brain.NeuralNetwork({ hiddenLayers: [24, 18, 12], activation: 'sigmoid', learningRate: 0.05, momentum: 0.1 });
+
+let iterDone = 0;
+const TOTAL = 600;
+net.train(data, {
+  iterations:  TOTAL,
+  errorThresh: 0.005,
+  logPeriod:   60,
+  log: (s) => {
+    iterDone += 60;
+    const pct = Math.round(22 + (iterDone / TOTAL) * 70);
+    parentPort.postMessage({ type: 'progress', pct: Math.min(pct, 92), msg: '⚡ Итерация ' + iterDone + '/' + TOTAL + ' — ' + s });
+  }
+});
+
+parentPort.postMessage({ type: 'progress', pct: 95, msg: '💾 Передаём веса в main thread...' });
+parentPort.postMessage({ type: 'done', weights: net.toJSON() });
+`;
+
+      const weights = await new Promise((resolve, reject) => {
         const { Worker } = require('worker_threads');
-        // buildSeedData() самодостаточна (все helpers внутри) → можно сериализовать
-        const src = `const{parentPort}=require('worker_threads');parentPort.postMessage((${buildSeedData.toString()})());`;
-        const w = new Worker(src, { eval: true });
-        w.on('message', resolve);
+        const w = new Worker(workerSrc, { eval: true, workerData: { brainPath } });
+        w.on('message', msg => {
+          if (msg.type === 'progress') prog(msg.pct, msg.msg);
+          else if (msg.type === 'done')  resolve(msg.weights);
+        });
         w.on('error', reject);
-        w.on('exit', code => { if (code !== 0) reject(new Error('BuildSeedData worker exited: ' + code)); });
-      });
-      prog(18, `✂️ Выбираем 200 000 из ${all.length.toLocaleString()} (ходьба/еда/pvp/криты/зелья)...`);
-
-      const n = Math.min(200000, all.length);
-      for (let i = all.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [all[i], all[j]] = [all[j], all[i]];
-      }
-      const data = all.slice(0, n);
-      prog(22, `🧠 Начинаем обучение нейросети (${n.toLocaleString()} сцен.)...`);
-      log.info(`[PvpBrain] Обучаем на ${n} сценариях (async)...`);
-
-      let iterDone = 0;
-      const TOTAL_ITER = 600;
-      await this.net.trainAsync(data, {
-        iterations:  TOTAL_ITER,
-        errorThresh: 0.005,
-        logPeriod:   60,
-        log: (s) => {
-          iterDone += 60;
-          const pct = Math.round(22 + (iterDone / TOTAL_ITER) * 70);
-          prog(Math.min(pct, 92), `⚡ Итерация ${iterDone}/${TOTAL_ITER} — ${s}`);
-        },
+        w.on('exit', code => { if (code !== 0) reject(new Error('Worker exited с кодом: ' + code)); });
       });
 
-      prog(95, '💾 Сохраняем веса на диск...');
+      prog(96, '🔗 Применяем веса в нейросеть (мгновенно)...');
+      this.net.fromJSON(weights); // быстро: ~1081 числа, не 1M объектов
+
+      prog(98, '💾 Сохраняем веса на диск...');
       try {
-        fs.writeFileSync(WEIGHTS_PATH, JSON.stringify(this.net.toJSON()), "utf8");
-        log.info("[PvpBrain] ✅ Веса сохранены. Следующий запуск будет мгновенным.");
-      } catch (e) { log.warn("[PvpBrain] Не сохранить веса:", e.message); }
+        fs.writeFileSync(WEIGHTS_PATH, JSON.stringify(this.net.toJSON()), 'utf8');
+        log.info('[PvpBrain] ✅ Веса сохранены. Следующий запуск будет мгновенным.');
+      } catch (e) { log.warn('[PvpBrain] Не сохранить веса:', e.message); }
 
-      prog(100, '✅ Обучение завершено!');
+      prog(100, '✅ Обучение завершено! PVP готов.');
       this.ready = true;
       done();
     } catch (e) {
-      log.error("[PvpBrain] Ошибка обучения:", e.message);
+      log.error('[PvpBrain] Ошибка обучения:', e.message);
       prog(100, '⚠️ Ошибка — режим эвристики');
       this.ready = true;
       done();
     }
   }
-
   decide(bot, target, teammates = [], extra = {}) {
     const features = getBotFeatures(bot, target, teammates);
     if (!features) return { action: "attack", confidence: 0.5, features };
