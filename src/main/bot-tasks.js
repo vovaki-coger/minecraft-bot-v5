@@ -132,7 +132,16 @@ class TaskManager {
       }
       exploreAttempts = 0;
       await this._eatIfHungry();
-      await this._gotoNearest(block.position, 2);
+      // FIX walk: для брёвен выше головы (y > bot.y + 1.5) GoalNear(block.y) заставлял
+      // pathfinder пытаться забраться на y+1 — не мог → тихо падал → бот завис на месте.
+      // Решение: передаём navY = bot.y, чтобы навигация была горизонтальной.
+      // Копать ВВЕРХ _safeDigBlock умеет: aimY = by+0.09 (нижняя грань) + face=0.
+      {
+        const navY = block.position.y > this.bot.entity.position.y + 1.5
+          ? this.bot.entity.position.y   // бревно выше — идём на свой уровень
+          : block.position.y;            // бревно рядом — идём к нему
+        await this._gotoNearest({ x: block.position.x, y: navY, z: block.position.z }, 2);
+      }
       if (!this._running) break;
       // Перечитываем блок — за время пути он мог быть сломан кем-то
       const freshBlock = this.bot.blockAt(block.position);
