@@ -292,9 +292,13 @@ class BotManager {
       bot.on('health', () => {
         const curHP = bot.health ?? 20;
         if (curHP < _lastBotHP - 0.5) {
-          // Получили урон → останавливаем pathfinder → физика отрабатывает knockback
-          try { bot.pathfinder.stop(); } catch {}
-          // Если в воздухе — сбрасываем прыжок
+          // FIX: останавливаем pathfinder только если PvP НЕ активен.
+          // Когда PvP-контроллер работает — он сам управляет pathfinder.
+          // Принудительный stop() при каждом ударе сбивал движение к цели.
+          if (!instance._pvpController?.isRunning()) {
+            try { bot.pathfinder.stop(); } catch {}
+          }
+          // Если в воздухе — сбрасываем прыжок (безопасно при любом режиме)
           if (!bot.entity?.onGround) {
             try { bot.setControlState('jump', false); } catch {}
           }
@@ -342,7 +346,10 @@ class BotManager {
           }
         }
 
-        if (newHealth < prevHealth && instance.config.selfDefense !== false) {
+        // FIX: самооборона (Ollama) только если PvP-контроллер НЕ активен.
+        // Иначе agentLoop перехватывает цель и конфликтует с pvp-controller.
+        if (newHealth < prevHealth && instance.config.selfDefense !== false &&
+            !instance._pvpController?.isRunning()) {
           // Ищем атакующего среди ВСЕХ сущностей (игроки + мобы)
           let attacker = null, minDist = 7;
           for (const e of Object.values(bot.entities)) {

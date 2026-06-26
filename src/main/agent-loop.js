@@ -79,18 +79,26 @@ class AgentLoop {
 
     // Кто ударил бота
     bot.on("entityHurt", (entity) => {
-      if (entity === bot.entity) this._onBotHurt();
+      // FIX: пропускаем если PvP-контроллер активен — он управляет сам
+      if (entity === bot.entity && !this.instance._pvpController?.isRunning()) {
+        this._onBotHurt();
+      }
     });
 
     // Кто ударил бота напрямую (attacker)
     bot.on("entityDamaged", (entity, attacker) => {
       if (entity !== bot.entity || !attacker) return;
-      this._registerAttacker(attacker);
+      // FIX: не перехватываем цель если PvP-контроллер уже управляет боем
+      if (!this.instance._pvpController?.isRunning()) {
+        this._registerAttacker(attacker);
+      }
     });
 
     // Обнаруживаем попадания через снижение HP
     bot._client?.on("entity_status", (data) => {
-      if (data.entityId === bot.entity?.id && data.entityStatus === 2) {
+      // FIX: только если PvP НЕ активен — иначе конфликт с pvp-controller
+      if (data.entityId === bot.entity?.id && data.entityStatus === 2 &&
+          !this.instance._pvpController?.isRunning()) {
         // Status 2 = hurt animation
         this._onBotHurt();
       }
@@ -134,6 +142,10 @@ class AgentLoop {
   }
 
   _onBotHurt() {
+    // FIX: если PvP-контроллер активен — он сам обрабатывает knockback,
+    // не останавливаем его pathfinder и не ставим паузу
+    if (this.instance._pvpController?.isRunning()) return;
+
     // AntiDetect: нокбек-пауза — даём серверу применить откат
     this._knockbackPauseUntil = Date.now() + 480;
     this._movingToTarget = false;
