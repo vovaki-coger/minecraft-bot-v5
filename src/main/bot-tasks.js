@@ -68,13 +68,14 @@ class TaskManager {
         // PvP-игрок с крит-ударами
         case "pvp_player":    await this._taskPvpPlayer(args); break;
         case "excavate":      await this._taskExcavate(args); break;
+        case "mine_ores":     await this._taskMineOres(args || {}); break;
         case "inventory":     this._reportInventory(); break;
         case "status":        this._reportStatus(); break;
-        default:              this._chat("Не знаю как это сделать");
+        default:              this._log("Не знаю как это сделать");
       }
     } catch (err) {
       log.error("Task error:", err.message);
-      this._chat("Ой, не получилось: " + err.message.slice(0, 50));
+      this._log("Ой, не получилось: " + err.message.slice(0, 50));
     }
 
     this._running = false;
@@ -88,20 +89,20 @@ class TaskManager {
   async _taskComeToPlayer(playerName) {
     const target = this._findPlayer(playerName);
     if (!target) {
-      this._chat(playerName ? "Не вижу игрока " + playerName : "Не вижу никого рядом");
+      this._log(playerName ? "Не вижу игрока " + playerName : "Не вижу никого рядом");
       return;
     }
-    this._chat("Иду к тебе, " + target.username + "!");
+    this._log("Иду к тебе, " + target.username + "!");
     await this.bot.pathfinder.goto(
       new goals.GoalNear(target.position.x, target.position.y, target.position.z, 2)
     ).catch(() => {});
-    this._chat("Я здесь!");
+    this._log("Я здесь!");
   }
 
   async _taskFollowPlayer(playerName) {
     const target = this._findPlayer(playerName);
-    if (!target) { this._chat("Не вижу " + (playerName || "тебя")); return; }
-    this._chat("Слежу за " + target.username + "! Напиши 'стоп' чтобы остановить");
+    if (!target) { this._log("Не вижу " + (playerName || "тебя")); return; }
+    this._log("Слежу за " + target.username + "! Напиши 'стоп' чтобы остановить");
     const deadline = Date.now() + 300_000;
     while (this._running && Date.now() < deadline && target.isValid) {
       await this.bot.pathfinder.goto(new goals.GoalFollow(target, 2)).catch(() => {});
@@ -110,14 +111,18 @@ class TaskManager {
   }
 
   async _taskGatherWood(count) {
-    this._chat("Иду рубить дерево, нужно " + count + " бревён!");
+    this._log("Иду рубить дерево, нужно " + count + " бревён!");
     const logIds = ["oak_log","birch_log","spruce_log","jungle_log","acacia_log","dark_oak_log","mangrove_log","cherry_log"]
       .map(n => this.bot.registry.blocksByName[n]?.id).filter(Boolean);
     let collected = 0, searchRadius = 64, exploreAttempts = 0;
     while (this._running && collected < count) {
-      const block = this.bot.findBlock({ matching: logIds, maxDistance: searchRadius });
+      // Ищем ближайшее бревно, предпочитая нижние (бот сможет достать без башни)
+      let block = this.bot.findBlock({ matching: logIds, maxDistance: searchRadius,
+        useExtraInfo: b => b.position.y <= this.bot.entity.position.y + 5 });
+      // Если нижних нет — берём любое
+      if (!block) block = this.bot.findBlock({ matching: logIds, maxDistance: searchRadius });
       if (!block) {
-        if (exploreAttempts >= 8) { this._chat("Не нашёл деревьев. Собрал: " + collected); break; }
+        if (exploreAttempts >= 8) { this._log("Не нашёл деревьев. Собрал: " + collected); break; }
         this._log("Деревьев нет в " + searchRadius + "м, исследую...");
         const pos = this.bot.entity.position;
         const angle = (exploreAttempts / 8) * Math.PI * 2;
@@ -138,21 +143,25 @@ class TaskManager {
       if (!freshBlock || freshBlock.type === 0 || freshBlock.name !== block.name) continue;
       await this._equipBestTool(freshBlock);
       await this.bot.lookAt(freshBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
+      const logsBefore = this._countInventory(/log/);
       await this.bot.dig(freshBlock).catch(() => {});
-      collected++;
-      if (collected % 5 === 0) this._log("Собрано " + collected + "/" + count + " бревён");
+      await this._sleep(200);
+      if (this._countInventory(/log/) > logsBefore) {
+        collected++;
+        if (collected % 5 === 0) this._log("⛏ Собрано " + collected + "/" + count + " бревён");
+      }
     }
-    this._chat("Готово! Собрал " + collected + " бревён");
+    this._log("Готово! Собрал " + collected + " бревён");
   }
 
   async _taskGatherBlock(blockName, count, label) {
-    this._chat((label || "Добываю " + blockName) + "...");
+    this._log((label || "Добываю " + blockName) + "...");
     const blockType = this.bot.registry.blocksByName[blockName];
-    if (!blockType) { this._chat("Не знаю блок: " + blockName); return; }
+    if (!blockType) { this._log("Не знаю блок: " + blockName); return; }
     let collected = 0;
     while (this._running && collected < count) {
       const block = this.bot.findBlock({ matching: blockType.id, maxDistance: 32 });
-      if (!block) { this._chat("Не нашёл рядом!"); break; }
+      if (!block) { this._log("Не нашёл рядом!"); break; }
       await this._eatIfHungry();
       await this._gotoNearest(block.position, 2);
       if (!this._running) break;
@@ -164,18 +173,18 @@ class TaskManager {
       await this.bot.dig(freshBlk).catch(() => {});
       collected++;
     }
-    this._chat("Добыл " + collected + " " + blockName);
+    this._log("Добыл " + collected + " " + blockName);
   }
 
   async _taskGatherFood() {
-    this._chat("Ищу еду...");
+    this._log("Ищу еду...");
     const animalNames = ["cow","pig","sheep","chicken"];
     for (const name of animalNames) {
       const entity = Object.values(this.bot.entities).find(
         e => e.name === name && e.position.distanceTo(this.bot.entity.position) < 32
       );
       if (entity) {
-        this._chat("Нашёл " + name + ", атакую!");
+        this._log("Нашёл " + name + ", атакую!");
         for (let i = 0; i < 8 && this._running && entity.isValid; i++) {
           await this.bot.pathfinder.goto(new goals.GoalFollow(entity, 1)).catch(() => {});
           this.bot.attack(entity);
@@ -184,16 +193,16 @@ class TaskManager {
         return;
       }
     }
-    this._chat("Нет животных рядом");
+    this._log("Нет животных рядом");
   }
 
   async _taskBuildFarm(size) {
-    this._chat("Строю ферму " + size + "x" + size + "!");
+    this._log("Строю ферму " + size + "x" + size + "!");
     if (!this.bot?.entity) return;
     const seedItem = this.bot.inventory.items().find(i =>
       ["wheat_seeds","seeds","carrot","potato","beetroot_seeds"].includes(i.name)
     );
-    if (!seedItem) { this._chat("Нет семян!"); return; }
+    if (!seedItem) { this._log("Нет семян!"); return; }
     const hoe = this.bot.inventory.items().find(i => i.name.includes("hoe"));
     const pos = this.bot.entity.position.clone().floor();
     let planted = 0;
@@ -215,16 +224,16 @@ class TaskManager {
         await this._sleep(100);
       }
     }
-    this._chat("Ферма готова! Посадил " + planted + " семян");
+    this._log("Ферма готова! Посадил " + planted + " семян");
   }
 
   async _taskBuildHouse() {
-    this._chat("Строю домик!");
+    this._log("Строю домик!");
     const buildBlock = this.bot.inventory.items().find(i =>
       i.name.includes("planks") || i.name.includes("cobblestone") || i.name.includes("log")
     );
     if (!buildBlock || buildBlock.count < 24) {
-      this._chat("Нужно минимум 24 блока. Есть: " + (buildBlock?.count || 0)); return;
+      this._log("Нужно минимум 24 блока. Есть: " + (buildBlock?.count || 0)); return;
     }
     await this.bot.equip(buildBlock, "hand").catch(() => {});
     const pos = this.bot.entity.position.clone().floor();
@@ -246,23 +255,23 @@ class TaskManager {
         }
       }
     }
-    this._chat("Домик готов! Поставил " + placed + " блоков");
+    this._log("Домик готов! Поставил " + placed + " блоков");
   }
 
   async _taskCraft(itemName, count) {
-    if (!itemName) { this._chat("Что скрафтить?"); return; }
-    this._chat("Крафчу " + itemName + "...");
+    if (!itemName) { this._log("Что скрафтить?"); return; }
+    this._log("Крафчу " + itemName + "...");
     const item = this.bot.registry.itemsByName[itemName];
-    if (!item) { this._chat("Не знаю предмет: " + itemName); return; }
+    if (!item) { this._log("Не знаю предмет: " + itemName); return; }
     const table = this.bot.findBlock({
       matching: this.bot.registry.blocksByName["crafting_table"]?.id, maxDistance: 16,
     });
     try {
       const recipe = this.bot.recipesFor(item.id, null, 1, table)[0];
-      if (!recipe) { this._chat("Нет рецепта для " + itemName); return; }
+      if (!recipe) { this._log("Нет рецепта для " + itemName); return; }
       await this.bot.craft(recipe, count, table);
-      this._chat("Скрафтил " + count + " " + itemName);
-    } catch (err) { this._chat("Не получилось: " + err.message.slice(0, 50)); }
+      this._log("Скрафтил " + count + " " + itemName);
+    } catch (err) { this._log("Не получилось: " + err.message.slice(0, 50)); }
   }
 
   async _taskAttackMob(targetName) {
@@ -273,8 +282,8 @@ class TaskManager {
       const tn = (targetName || "").toLowerCase();
       return (!tn || nm === tn || dn.includes(tn)) && e.position.distanceTo(this.bot.entity.position) < 32;
     });
-    if (!entity) { this._chat("Не вижу " + (targetName || "врага") + " рядом"); return; }
-    this._chat("Атакую " + (entity.displayName || entity.name) + "!");
+    if (!entity) { this._log("Не вижу " + (targetName || "врага") + " рядом"); return; }
+    this._log("Атакую " + (entity.displayName || entity.name) + "!");
     if (this.bot.pvp) {
       this.bot.pvp.attack(entity);
       while (this._running && entity.isValid && entity.health > 0) await this._sleep(500);
@@ -291,19 +300,19 @@ class TaskManager {
         await this._sleep(420 + Math.floor(Math.random() * 260));
       }
     }
-    this._chat((entity.displayName || entity.name) + " побеждён!");
+    this._log((entity.displayName || entity.name) + " побеждён!");
   }
 
   async _taskWalkTo(x, y, z) {
     if (x === undefined || x === null) return;
     const fy = y !== undefined && y !== null ? Math.round(y) : Math.round(this.bot.entity.position.y);
-    this._chat("Иду к " + Math.round(x) + " " + fy + " " + Math.round(z));
+    this._log("Иду к " + Math.round(x) + " " + fy + " " + Math.round(z));
     await this.bot.pathfinder.goto(new goals.GoalBlock(Math.round(x), fy, Math.round(z))).catch(() => {});
-    this._chat("Пришёл!");
+    this._log("Пришёл!");
   }
 
   async _taskExplore() {
-    this._chat("Исследую окрестности!");
+    this._log("Исследую окрестности!");
     for (let i = 0; i < 5 && this._running; i++) {
       const dx = Math.floor(Math.random() * 60 - 30);
       const dz = Math.floor(Math.random() * 60 - 30);
@@ -311,7 +320,7 @@ class TaskManager {
       await this.bot.pathfinder.goto(new goals.GoalNear(p.x + dx, p.y, p.z + dz, 2)).catch(() => {});
       await this._sleep(1200);
     }
-    this._chat("Исследование завершено!");
+    this._log("Исследование завершено!");
   }
 
   async _taskFarmTrees(radius, cropType) {
@@ -996,7 +1005,7 @@ class TaskManager {
   async _taskExcavate(args) {
     const { x1, y1, z1, x2, y2, z2 } = args || {};
     if (x1 == null || y1 == null || z1 == null || x2 == null || y2 == null || z2 == null) {
-      this._chat('Укажи две точки: x1 y1 z1 x2 y2 z2');
+      this._log('Укажи две точки: x1 y1 z1 x2 y2 z2');
       return;
     }
     const Vec3 = require('vec3');
@@ -1004,7 +1013,7 @@ class TaskManager {
     const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
     const minZ = Math.min(z1, z2), maxZ = Math.max(z1, z2);
     const total = (maxX-minX+1) * (maxY-minY+1) * (maxZ-minZ+1);
-    this._chat(`⛏ Начинаю раскопку: ${maxX-minX+1}x${maxY-minY+1}x${maxZ-minZ+1} = ${total} блоков`);
+    this._log(`⛏ Начинаю раскопку: ${maxX-minX+1}x${maxY-minY+1}x${maxZ-minZ+1} = ${total} блоков`);
     let dug = 0, skipped = 0;
     const SKIP = new Set(['air','water','lava','void_air','cave_air']);
 
@@ -1043,11 +1052,95 @@ class TaskManager {
         }
       }
     }
-    this._chat(`✅ Раскопка завершена! Выкопано: ${dug}, пропущено: ${skipped}`);
+    this._log(`✅ Раскопка завершена! Выкопано: ${dug}, пропущено: ${skipped}`);
     this.emit("bot:excavateDone", { botId: this.instance.id, dug, skipped });
   }
 
 
+
+
+
+  /**
+   * mine_ores — спуск на Y=11 и добыча всех руд в радиусе
+   * 1. Идёт на Y=11 (алмазный уровень)
+   * 2. Ищет ближайшие руды в радиусе maxDistance
+   * 3. Подходит → смотрит → ломает лучшей киркой
+   * 4. Если руд нет — исследует рандомное направление
+   * 5. Останавливается при полном инвентаре
+   */
+  async _taskMineOres(opts = {}) {
+    const { radius = 48, targetY = 11 } = opts;
+    this._log("⛏ Добыча руд: спускаюсь на Y=" + targetY + "...");
+
+    const pos = this.bot.entity.position;
+    await this.bot.pathfinder.goto(
+      new goals.GoalNear(pos.x, targetY, pos.z, 3)
+    ).catch(() => {});
+    if (!this._running) return;
+
+    const oreNames = [
+      "diamond_ore","deepslate_diamond_ore",
+      "iron_ore","deepslate_iron_ore",
+      "gold_ore","deepslate_gold_ore",
+      "coal_ore","deepslate_coal_ore",
+      "emerald_ore","deepslate_emerald_ore",
+      "lapis_ore","deepslate_lapis_ore",
+      "redstone_ore","deepslate_redstone_ore",
+      "copper_ore","deepslate_copper_ore",
+      "ancient_debris","nether_quartz_ore","nether_gold_ore",
+    ];
+    const oreIds = oreNames.map(n => this.bot.registry.blocksByName[n]?.id).filter(Boolean);
+
+    let mined = 0, emptySearches = 0;
+    this._log("⛏ Ищу руды в радиусе " + radius + " блоков...");
+
+    while (this._running) {
+      await this._eatIfHungry();
+
+      if (this.bot.inventory.items().length >= 35) {
+        this._log("⛏ Инвентарь полон! Добыто: " + mined + " руд");
+        break;
+      }
+
+      const ore = this.bot.findBlock({ matching: oreIds, maxDistance: radius });
+      if (!ore) {
+        emptySearches++;
+        if (emptySearches >= 4) { this._log("⛏ Руды не найдены рядом"); break; }
+        // Исследуем новый участок
+        const p = this.bot.entity.position;
+        const dx = (Math.random() - 0.5) * 40;
+        const dz = (Math.random() - 0.5) * 40;
+        this.bot.lookAt(p.offset(dx, 0, dz), false).catch(() => {});
+        await this.bot.pathfinder.goto(
+          new goals.GoalNear(p.x + dx, targetY, p.z + dz, 3)
+        ).catch(() => {});
+        continue;
+      }
+      emptySearches = 0;
+
+      await this._gotoNearest(ore.position, 3);
+      if (!this._running) break;
+
+      const freshOre = this.bot.blockAt(ore.position);
+      if (!freshOre || freshOre.type === 0) continue;
+
+      await this._equipBestTool(freshOre);
+      await this.bot.lookAt(freshOre.position.offset(0.5, 0.5, 0.5), true).catch(() => {});
+      await this.bot.dig(freshOre).catch(() => {});
+      mined++;
+      if (mined % 5 === 0) this._log("⛏ Добыто руд: " + mined);
+    }
+
+    this._log("⛏ Добыча завершена. Итого: " + mined + " руд");
+  }
+
+  // ── Подсчёт предметов в инвентаре по паттерну имени ─────────────────────
+  _countInventory(pattern) {
+    const re = typeof pattern === 'string' ? new RegExp(pattern) : pattern;
+    return this.bot.inventory.items()
+      .filter(i => re.test(i.name))
+      .reduce((sum, i) => sum + i.count, 0);
+  }
 
   // ── Авто-выбор инструмента перед ломкой ───────────────────────────────────
   async _equipBestTool(block) {
@@ -1115,6 +1208,8 @@ class TaskManager {
   }
 
   async _gotoNearest(pos, range = 3) {
+    // Смотрим в направлении цели пока идём
+    this.bot.lookAt(pos.offset(0.5, 0.5, 0.5), false).catch(() => {});
     await this.bot.pathfinder.goto(
       new goals.GoalNear(pos.x, pos.y, pos.z, range)
     ).catch(() => {});
@@ -1122,15 +1217,15 @@ class TaskManager {
 
   _reportInventory() {
     const items = this.bot.inventory.items();
-    if (!items.length) { this._chat("Инвентарь пустой"); return; }
+    if (!items.length) { this._log("Инвентарь пустой"); return; }
     const top = items.sort((a,b) => b.count - a.count).slice(0,5)
       .map(i => (i.displayName || i.name) + " x" + i.count).join(", ");
-    this._chat("Инвентарь: " + top);
+    this._log("Инвентарь: " + top);
   }
 
   _reportStatus() {
     const s = this.instance.stats;
-    this._chat("HP:" + Math.round(s.health) + "/20 Еда:" + Math.round(s.food) + "/20 XP:" + s.experience +
+    this._log("HP:" + Math.round(s.health) + "/20 Еда:" + Math.round(s.food) + "/20 XP:" + s.experience +
       " Pos:" + s.x + " " + s.y + " " + s.z);
   }
 
