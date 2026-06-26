@@ -42,7 +42,7 @@ async function buildSeedData() {
 
   // 1a. Идём к обнаруженной руде (dist 0.15-1.0, ore_visible) (70k)
   await yieldLoop();
-  for(let i=0;i<70000;i++){
+  for(let i=0;i<1400;i++){
     const dist=rnd(0.15,1.0),ore=rnd(0.5,1.0),pick_=1;
     const danger=rnd(0,0.3),light=rnd(0.3,1.0);
     lbl([dist,ore,pick_,pick([0,1]),pick([0,1]),rnd(0.5,1),rnd(0,0.7),rnd(0,1),light,danger,1,pick([0,1])],
@@ -50,28 +50,28 @@ async function buildSeedData() {
   }
   // 1b. Прокладываем тоннель (нет руды, идём вглубь) (55k)
   await yieldLoop();
-  for(let i=0;i<55000;i++){
+  for(let i=0;i<1100;i++){
     const dist=rnd(0.10,0.80),depth=rnd(0.3,1.0),pick_=1,light=rnd(0.4,1.0);
     lbl([dist,rnd(0,0.2),pick_,pick([0,1]),pick([0,1]),rnd(0.5,1),rnd(0,0.65),depth,light,rnd(0,0.2),1,pick([0,1])],
       clamp(0.82+depth*0.14,0.75,0.97),0,0,0,0,0,0.06);
   }
   // 1c. Возврат с полным инвентарём (45k)
   await yieldLoop();
-  for(let i=0;i<45000;i++){
+  for(let i=0;i<900;i++){
     const inv=rnd(0.78,1.0),dist=rnd(0.15,0.90);
     lbl([dist,rnd(0,0.5),rnd(0,1),rnd(0,1),rnd(0,1),rnd(0.4,1),inv,rnd(0,1),rnd(0.2,1),rnd(0,0.4),1,rnd(0,1)],
       clamp(0.78+inv*0.18,0.72,0.97),0,0,0,0,clamp(inv*0.22,0.12,0.38),0.05);
   }
   // 1d. Уклонение от опасности (враги, убегаем) (30k)
   await yieldLoop();
-  for(let i=0;i<30000;i++){
+  for(let i=0;i<600;i++){
     const danger=rnd(0.5,1.0),hp=rnd(0.1,0.7),dist=rnd(0,0.5);
     lbl([dist,rnd(0,0.5),rnd(0,1),rnd(0,1),rnd(0,1),rnd(0.3,0.8),rnd(0,0.8),rnd(0,1),rnd(0,0.5),danger,1,rnd(0,1)],
       0,0,0,0,clamp(0.75+danger*0.22,0.65,0.97),0,0.05);
   }
   // 1e. Общая навигация в шахте (50k)
   await yieldLoop();
-  for(let i=0;i<50000;i++){
+  for(let i=0;i<1000;i++){
     const dist=rnd(0.05,1.0),pick_=pick([0,1]);
     lbl([dist,rnd(0,1),pick_,pick([0,1]),pick([0,1]),rnd(0.4,1),rnd(0,0.8),rnd(0,1),rnd(0,1),rnd(0,0.5),1,rnd(0,1)],
       clamp(0.68+dist*0.28,0.50,0.97),0,0,0,0,0,0.08);
@@ -83,42 +83,42 @@ async function buildSeedData() {
 
   // 2a. Добыча руды (dist близко, ore_visible, есть кирка) (90k)
   await yieldLoop();
-  for(let i=0;i<90000;i++){
+  for(let i=0;i<1800;i++){
     const dist=rnd(0,0.12),ore=rnd(0.7,1.0),pick_=1,danger=rnd(0,0.35),light=rnd(0.2,1.0);
     lbl([dist,ore,pick_,pick([0,1]),pick([0,1]),rnd(0.5,1),rnd(0,0.75),rnd(0,1),light,danger,1,pick([0,1])],
       0,clamp(0.88+ore*0.10,0.82,0.98),0,0,0,0,0.03);
   }
   // 2b. Добыча камня (нет руды, прокопка тоннеля) (50k)
   await yieldLoop();
-  for(let i=0;i<50000;i++){
+  for(let i=0;i<1000;i++){
     const dist=rnd(0,0.12),ore=rnd(0,0.25),pick_=1,light=rnd(0.3,1.0);
     lbl([dist,ore,pick_,pick([0,1]),pick([0,1]),rnd(0.5,1),rnd(0,0.70),rnd(0.3,1.0),light,rnd(0,0.2),1,1],
       0,clamp(0.78+(0.25-ore)*0.50,0.65,0.95),0,0,0,0,0.06);
   }
   // 2c. Установка факелов (темно, есть факел, инв не полный) (35k)
   await yieldLoop();
-  for(let i=0;i<35000;i++){
+  for(let i=0;i<700;i++){
     const light=rnd(0,0.35),torch=1,dist=rnd(0,0.10),danger=rnd(0,0.4);
     lbl([dist,rnd(0,0.5),rnd(0,1),torch,rnd(0,1),rnd(0.5,1),rnd(0,0.70),rnd(0.2,1.0),light,danger,1,1],
       0,0,clamp(0.82+(0.35-light)*1.5,0.68,0.97),0,0,0,0.05);
   }
   // 2d. Еда (голодный, без опасности) (35k)
   await yieldLoop();
-  for(let i=0;i<35000;i++){
+  for(let i=0;i<700;i++){
     const hunger=rnd(0,0.38),danger=rnd(0,0.3),food=1;
     lbl([rnd(0,0.5),rnd(0,0.5),rnd(0,1),rnd(0,1),rnd(0,1),hunger,rnd(0,0.7),rnd(0,1),rnd(0.3,1),danger,food,rnd(0,1)],
       0,0,0,clamp(0.82+(0.38-hunger)*1.8,0.68,0.97),0,0,0);
   }
   // 2e. Отступление при опасности (враги рядом, hp низкий) (25k)
   await yieldLoop();
-  for(let i=0;i<25000;i++){
+  for(let i=0;i<500;i++){
     const danger=rnd(0.55,1.0),hp=rnd(0.05,0.45);
     lbl([rnd(0,0.3),rnd(0,0.5),rnd(0,1),rnd(0,1),rnd(0,1),rnd(0.2,0.6),rnd(0,0.8),rnd(0,1),rnd(0,0.5),danger,1,rnd(0,1)],
       0,0,0,0,clamp(0.78+danger*0.20,0.65,0.97),0,0.04);
   }
   // 2f. Сдача ресурсов (инвентарь почти полон) (15k)
   await yieldLoop();
-  for(let i=0;i<15000;i++){
+  for(let i=0;i<300;i++){
     const inv=rnd(0.82,1.0),dist=rnd(0,0.10);
     lbl([dist,rnd(0,0.4),rnd(0,1),rnd(0,1),rnd(0,1),rnd(0.4,1),inv,rnd(0,1),rnd(0.2,1),rnd(0,0.3),1,rnd(0,1)],
       0,0,0,0,0,clamp(0.85+inv*0.13,0.80,0.97),0.04);
@@ -147,17 +147,20 @@ class MinerBrain {
     const prog=(pct,msg)=>{log.info(`[MinerBrain] ${pct}% — ${msg}`);try{if(typeof this._onProgress==='function')this._onProgress(pct,msg);}catch{}};
     const yieldLoop=()=>new Promise(r=>setImmediate(r));
     try{
-      prog(3,'📚 Генерируем 500 000 сценариев (ходьба+добыча)...');
+      prog(3,'📚 Генерируем ~10 000 сценариев (шахтёр, ускоренный режим)...');
       // ИСПРАВЛЕНИЕ: теперь async — не блокирует Event Loop
       const all=await buildSeedData();
-      prog(18,`✂️ Выбираем 200 000 из ${all.length.toLocaleString()}...`);
+      prog(18,`✅ Сгенерировано ${all.length.toLocaleString()} сценариев — начинаем обучение...`);
+      // FIX: dataset уменьшен ~50x (10k vs 500k) → shuffle 10k = 10мс, нет белого экрана
       for(let i=all.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[all[i],all[j]]=[all[j],all[i]];}
-      const data=all.slice(0,Math.min(200000,all.length));
+      const data=all;
       prog(22,`⛏ Обучаем нейросеть шахтёра (${data.length.toLocaleString()} сцен.)...`);
-      let iterDone=0;const TOTAL=600;
+      let iterDone=0;const TOTAL=300;
+      // FIX: logPeriod:10 → Event Loop уступается каждые 10 итераций
+      // С 10k сцен: 10 × 10k × ~600ops = 60M → ~60мс/батч → НЕТ белого экрана
       await this.net.trainAsync(data,{
-        iterations:TOTAL,errorThresh:0.005,logPeriod:60,
-        log:(s)=>{iterDone+=60;prog(Math.min(22+Math.round((iterDone/TOTAL)*70),92),`⚡ Итерация ${iterDone}/${TOTAL}`);}
+        iterations:TOTAL,errorThresh:0.008,logPeriod:10,
+        log:(s)=>{iterDone+=10;prog(Math.min(22+Math.round((iterDone/TOTAL)*70),92),`⚡ Итерация ${iterDone}/${TOTAL}`);}
       });
       prog(95,'💾 Сохраняем веса...');
       try{fs.writeFileSync(WEIGHTS_PATH,JSON.stringify(this.net.toJSON()),"utf8");}catch{}
