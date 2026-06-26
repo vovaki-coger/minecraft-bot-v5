@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       "bot:farmStarted", "bot:farmStopped", "bot:farmLog",
       "bot:excavateProgress", "bot:excavateDone",
       "bot:pvpStarted", "bot:pvpStopped", "bot:pvpToggled", "bot:pvpBrainTraining", "bot:pvpBrainReady",
+      "bot:farmBrainTraining", "bot:farmBrainReady", "bot:minerBrainTraining", "bot:minerBrainReady",
       "bot:chestOpened", "bot:chestClosed",
       "ollama:pullProgress",
       "coordinator:statusUpdate", "coordinator:taskAssigned", "coordinator:groupChat",
