@@ -168,6 +168,10 @@ body {
   0%, 100% { text-shadow: 0 0 6px currentColor; }
   50%       { text-shadow: 0 0 18px currentColor, 0 0 30px currentColor; }
 }
+@keyframes spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 
 /* ── Cyberpunk glow helpers ────────────────────────────────────────────── */
 .glow-green { text-shadow: 0 0 8px var(--accent), 0 0 16px var(--accent-glow); }
