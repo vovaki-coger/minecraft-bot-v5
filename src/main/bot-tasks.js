@@ -1302,7 +1302,13 @@ class TaskManager {
       const _blockAbove = fresh.position.y > _eyeY &&
         Math.abs(this.bot.entity.position.x - fresh.position.x - 0.5) < 1.0 &&
         Math.abs(this.bot.entity.position.z - fresh.position.z - 0.5) < 1.0;
-      if (!_blockAbove && typeof this.bot.canSeeBlock === 'function' && !this.bot.canSeeBlock(fresh)) return false;
+      // FIX dig-bug: canSeeBlock() давал false на реально доступных блоках →
+      // бот тихо пропускал блоки и ничего не копал.
+      // bot.lookAt(aim,true) уже развернул голову; копаем всегда, ошибка поймается ниже.
+      if (!_blockAbove && typeof this.bot.canSeeBlock === 'function' && !this.bot.canSeeBlock(fresh)) {
+        // НЕ прерываем (убрали return false) — продолжаем копать
+        // bot._client.write / dig сам вернёт ошибку если блок реально недостижим
+      }
 
       // FIX-B защита: неломаемые блоки дают Infinity → бесконечный цикл → краш
       const rawDig = this.bot.digTime(fresh);
