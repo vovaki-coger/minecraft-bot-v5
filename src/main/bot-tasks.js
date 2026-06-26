@@ -1407,22 +1407,13 @@ class TaskManager {
   }
 
   async _gotoNearest(pos, range = 3) {
-    try {
-      const dist = this.bot.entity?.position?.distanceTo(pos) ?? 99;
-      if (dist <= range) return; // уже на месте
-
-      // Включаем движение вперёд явно (как PVP brain) — pathfinder управляет направлением
-      try { this.bot.setControlState('sprint', false); } catch {}
-      try { this.bot.setControlState('forward', true); } catch {}
-
-      await this.bot.pathfinder.goto(
-        new goals.GoalNear(pos.x, pos.y, pos.z, range)
-      ).catch(() => {});
-    } catch {}
-
-    // Сбрасываем управление после прихода
-    try { this.bot.setControlState('forward', false); } catch {}
-    try { this.bot.setControlState('sprint', false); } catch {}
+    // Pathfinder сам управляет setControlState — не вмешиваемся.
+    // Добавление forward=true конфликтует с pathfinder и ломает навигацию.
+    const dist = this.bot.entity?.position?.distanceTo(pos) ?? 99;
+    if (dist <= range) return; // уже на месте
+    await this.bot.pathfinder.goto(
+      new goals.GoalNear(pos.x, pos.y, pos.z, range)
+    ).catch(() => {});
   }
 
   _reportInventory() {
