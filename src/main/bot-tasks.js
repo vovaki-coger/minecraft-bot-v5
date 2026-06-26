@@ -22,12 +22,8 @@ class TaskManager {
   }
 
   _chat(msg) {
-    if (this.bot && msg) {
-      const text = String(msg).slice(0, 100);
-      this.bot.chat(text);
-      this.instance.chatHistory.push({ type: "bot", text, timestamp: Date.now() });
-      this.emit("bot:chat", { botId: this.instance.id, username: this.instance.config.nick, message: text, type: "bot" });
-    }
+    // Не пишем в чат сервера — только в лог интерфейса
+    this._log(msg);
   }
 
   async stopAll() {
@@ -170,8 +166,11 @@ class TaskManager {
       if (!freshBlk || freshBlk.type === 0) continue;
       await this._equipBestTool(freshBlk);
       await this.bot.lookAt(freshBlk.position.offset(0.5,0.5,0.5),true).catch(()=>{});
+      const countBefore = this._countInventory(new RegExp(blockName.replace("_", ".")));
       await this.bot.dig(freshBlk).catch(() => {});
-      collected++;
+      await this._sleep(150);
+      const countAfter = this._countInventory(new RegExp(blockName.replace("_", ".")));
+      if (countAfter > countBefore) collected++;
     }
     this._log("Добыл " + collected + " " + blockName);
   }
