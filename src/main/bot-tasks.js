@@ -209,13 +209,11 @@ class TaskManager {
         const block = this.bot.blockAt(tp);
         if (!block) continue;
         if (hoe && (block.name === "dirt" || block.name === "grass_block")) {
-          await this.bot.equip(hoe, "hand").catch(() => {});
-          await this.bot.activateBlock(block).catch(() => {});
-          await this._sleep(200);
+          await this._safeActivateBlock(block, hoe);
+          await this._sleep(100);
         }
-        await this.bot.equip(seedItem, "hand").catch(() => {});
         const tilled = this.bot.blockAt(tp);
-        if (tilled) { await this.bot.activateBlock(tilled).catch(() => {}); planted++; }
+        if (tilled) { await this._safeActivateBlock(tilled, seedItem); planted++; }
         await this._sleep(100);
       }
     }
@@ -409,9 +407,8 @@ class TaskManager {
             if (ground && ["dirt","grass_block","sand","gravel","mud","mycelium","podzol"].includes(ground.name)) {
               const seedItem = this.bot.inventory.items().find(i => i.name === crop);
               if (seedItem) {
-                await this._gotoNearest(tp, 3);
-                await this.bot.equip(seedItem, "hand").catch(() => {});
-                await this.bot.activateBlock(ground).catch(() => {});
+                await this._gotoNearest(tp, 2);
+                await this._safeActivateBlock(ground, seedItem);
                 await this._sleep(80);
                 planted++;
               }
@@ -444,9 +441,8 @@ class TaskManager {
               const freshBone = this.bot.inventory.items().find(i => i.name === "bone_meal");
               if (freshBone) {
                 await this._gotoNearest(tp, 3);
-                await this.bot.equip(freshBone, "hand").catch(() => {});
                 for (let b = 0; b < 4 && this._running; b++) {
-                  await this.bot.activateBlock(stemBlock).catch(() => {});
+                  await this._safeActivateBlock(stemBlock, freshBone);
                   await this._sleep(40);
                 }
               }
@@ -460,7 +456,7 @@ class TaskManager {
         if (cropBlock && cropBlock.name === growthName) {
           const age = cropBlock.getProperties?.()?.age ?? cropBlock.metadata ?? 0;
           if (age >= maxAge) {
-            await this._gotoNearest(tp, 3);
+            await this._gotoNearest(tp, 2);
             if (!this._running) break;
             await this._safeDigBlock(cropBlock);
             await this._sleep(60);
@@ -468,8 +464,7 @@ class TaskManager {
             if (freshSeed) {
               const farmBlock = this.bot.blockAt(tp);
               if (farmBlock) {
-                await this.bot.equip(freshSeed, "hand").catch(() => {});
-                await this.bot.activateBlock(farmBlock).catch(() => {});
+                await this._safeActivateBlock(farmBlock, freshSeed);
                 planted++;
               }
             }
@@ -479,10 +474,9 @@ class TaskManager {
           if (bonemeal && boneItem) {
             const freshBone = this.bot.inventory.items().find(i => i.name === "bone_meal");
             if (freshBone) {
-              await this._gotoNearest(tp, 3);
-              await this.bot.equip(freshBone, "hand").catch(() => {});
+              await this._gotoNearest(tp, 2);
               for (let b = 0; b < 4 && this._running; b++) {
-                await this.bot.activateBlock(cropBlock).catch(() => {});
+                await this._safeActivateBlock(cropBlock, freshBone);
                 await this._sleep(40);
               }
             }
@@ -495,15 +489,14 @@ class TaskManager {
         if (!groundBlock) continue;
         if (!["dirt","grass_block","farmland"].includes(groundBlock.name)) continue;
 
-        await this._gotoNearest(tp, 3);
+        await this._gotoNearest(tp, 2);
         if (!this._running) break;
 
         if (hoe && groundBlock.name !== "farmland") {
           const freshHoe = this.bot.inventory.items().find(i => i.name.includes("hoe"));
           if (freshHoe) {
-            await this.bot.equip(freshHoe, "hand").catch(() => {});
-            await this.bot.activateBlock(groundBlock).catch(() => {});
-            await this._sleep(150);
+            await this._safeActivateBlock(groundBlock, freshHoe);
+            await this._sleep(100);
           }
         }
 
@@ -512,8 +505,7 @@ class TaskManager {
 
         const tilledBlock = this.bot.blockAt(tp);
         if (tilledBlock?.name === "farmland") {
-          await this.bot.equip(freshSeed, "hand").catch(() => {});
-          await this.bot.activateBlock(tilledBlock).catch(() => {});
+          await this._safeActivateBlock(tilledBlock, freshSeed);
           planted++;
           await this._sleep(80);
 
@@ -521,11 +513,10 @@ class TaskManager {
           if (bonemeal) {
             const freshBone = this.bot.inventory.items().find(i => i.name === "bone_meal");
             if (freshBone) {
-              await this.bot.equip(freshBone, "hand").catch(() => {});
               const newCrop = this.bot.blockAt(tp.offset(0, 1, 0));
               if (newCrop && newCrop.name === growthName) {
                 for (let b = 0; b < 6 && this._running; b++) {
-                  await this.bot.activateBlock(newCrop).catch(() => {});
+                  await this._safeActivateBlock(newCrop, freshBone);
                   await this._sleep(40);
                 }
               }
@@ -589,10 +580,9 @@ class TaskManager {
               // Сразу сажаем снова
               const seed = this.bot.inventory.items().find(i => i.name === crop);
               if (seed) {
-                await this.bot.equip(seed, "hand").catch(() => {});
                 const newGround = this.bot.blockAt(tp);
                 if (newGround?.name === "farmland") {
-                  await this.bot.activateBlock(newGround).catch(() => {});
+                  await this._safeActivateBlock(newGround, seed);
                   await this._sleep(35 + Math.random() * 10);
                 }
               }
@@ -602,9 +592,8 @@ class TaskManager {
             if (bonemeal) {
               const bone = this.bot.inventory.items().find(i => i.name === "bone_meal");
               if (bone) {
-                await this.bot.equip(bone, "hand").catch(() => {});
                 for (let b = 0; b < 6 && this._running; b++) {
-                  await this.bot.activateBlock(above).catch(() => {});
+                  await this._safeActivateBlock(above, bone);
                   await this._sleep(35 + Math.random() * 10);
                   // Проверяем выросло ли
                   const freshAbove = this.bot.blockAt(tp.offset(0, 1, 0));
@@ -618,8 +607,7 @@ class TaskManager {
             // Пустое место — сажаем
             const seed = this.bot.inventory.items().find(i => i.name === crop);
             if (seed) {
-              await this.bot.equip(seed, "hand").catch(() => {});
-              await this.bot.activateBlock(ground).catch(() => {});
+              await this._safeActivateBlock(ground, seed);
               await this._sleep(35 + Math.random() * 10);
             }
           }
@@ -697,9 +685,8 @@ class TaskManager {
       const above = this.bot.blockAt(tp.offset(0, 1, 0));
       if (above && above.type !== 0) continue; // не пусто
 
-      await this.bot.equip(seedItem, "hand").catch(() => {});
-      await this.bot.activateBlock(ground).catch(() => {});
-      await this._sleep(120);
+      await this._safeActivateBlock(ground, seedItem);
+      await this._sleep(80);
       planted++;
 
       // Костная мука до роста
@@ -710,9 +697,8 @@ class TaskManager {
           if (!sapBlock || !sapBlock.name.includes("sapling")) break; // выросло
           const bone = this.bot.inventory.items().find(i => i.name === "bone_meal");
           if (!bone) break;
-          await this.bot.equip(bone, "hand").catch(() => {});
-          await this.bot.activateBlock(sapBlock).catch(() => {});
-          await this._sleep(80);
+          await this._safeActivateBlock(sapBlock, bone);
+          await this._sleep(60);
         }
       }
 
@@ -1212,51 +1198,131 @@ class TaskManager {
   // 3. lookAt(force=true) + 80мс паузы — даём серверу обработать поворот.
   // 4. Перечитываем блок (мог упасть пока делали lookAt).
   // 5. dig().
+
+  // ── Активация блока с правильным взглядом (anarchia-протокол) ────────────
+  // activateBlock() без lookAt игнорируется сервером → вспашка/посадка не работает.
+  // 1. Стопаем pathfinder
+  // 2. Смотрим на верхнюю грань блока (y+0.9) — для дёрна/грядки всегда верх
+  // 3. Ждём 70мс — Look packet
+  // 4. activateBlock()
+  async _safeActivateBlock(block, handItem) {
+    if (!block || !this._running) return;
+    try {
+      try { this.bot.pathfinder.stop(); } catch {}
+      await this._sleep(55 + Math.random() * 20);
+
+      if (handItem) {
+        await this.bot.equip(handItem, 'hand').catch(() => {});
+        await this._sleep(30);
+      }
+
+      const Vec3 = require('vec3');
+      // Смотрим на верхнюю грань (y+0.9) — стандарт для взаимодействия с землёй
+      const aimY = block.position.y + 0.9;
+      const aim  = new Vec3(block.position.x + 0.5, aimY, block.position.z + 0.5);
+      await this.bot.lookAt(aim, true).catch(() => {});
+      await this._sleep(70 + Math.random() * 20);
+
+      await this.bot.activateBlock(block).catch(() => {});
+      this.bot.swingArm('right', true); // анимация правой руки
+    } catch {}
+  }
+
+  // ── Вычисляем грань блока по позиции глаз бота ──────────────────────────────
+  // Протокол Minecraft: face 0=низ 1=верх 2=север(-Z) 3=юг(+Z) 4=запад(-X) 5=восток(+X)
+  _calcDigFace(block) {
+    const eyeY = this.bot.entity.position.y + 1.62;
+    const by   = block.position.y;
+    if (eyeY > by + 1.02) return 1; // верхняя грань
+    if (eyeY < by - 0.02) return 0; // нижняя грань
+    // Боковая — ближайшая ось
+    const dx = this.bot.entity.position.x - (block.position.x + 0.5);
+    const dz = this.bot.entity.position.z - (block.position.z + 0.5);
+    if (Math.abs(dx) > Math.abs(dz)) return dx > 0 ? 5 : 4; // восток / запад
+    return dz > 0 ? 3 : 2;                                    // юг / север
+  }
+
+  // ── Безопасное копание: стопаем pathfinder → aim → canSee → ручной dig ────
+  //
+  //  FIX 1 (ранний отпуск кнопки): bot.dig() использует таймер mineflayer
+  //    который отправляет FINISH_DIG на ~290мс раньше реального ломания блока.
+  //    Решение: ручной block_dig protocol с буфером 280мс поверх digTime().
+  //
+  //  FIX 2 (ломает через стены): добавлен canSeeBlock() — если не видит блок
+  //    → возвращаем false, бот не пытается копать сквозь стену.
   async _safeDigBlock(block) {
     if (!block || !this._running) return false;
     try {
-      // Стопаем pathfinder — иначе он перезапишет взгляд после lookAt
+      // Стопаем pathfinder чтобы он не перезаписывал взгляд после lookAt
       try { this.bot.pathfinder.stop(); } catch {}
-      await this._sleep(60 + Math.random() * 20);
+      await this._sleep(55 + Math.random() * 20);
 
       await this._equipBestTool(block);
 
-      // Вычисляем точку на видимой грани блока
-      const eyeY  = this.bot.entity.position.y + 1.62;
-      const botX  = this.bot.entity.position.x;
-      const botZ  = this.bot.entity.position.z;
-      const bx    = block.position.x;
-      const by    = block.position.y;
-      const bz    = block.position.z;
+      // Точка прицела — видимая грань (не центр блока)
+      const eyeY = this.bot.entity.position.y + 1.62;
+      const botX = this.bot.entity.position.x;
+      const botZ = this.bot.entity.position.z;
+      const bx   = block.position.x;
+      const by   = block.position.y;
+      const bz   = block.position.z;
 
       let aimX, aimY, aimZ;
       if (eyeY > by + 1.02) {
-        // Бот выше блока → видна верхняя грань
-        aimX = bx + 0.5; aimY = by + 0.92; aimZ = bz + 0.5;
+        aimX = bx + 0.5; aimY = by + 0.91; aimZ = bz + 0.5; // верхняя грань
       } else if (eyeY < by - 0.02) {
-        // Бот ниже блока → видна нижняя грань
-        aimX = bx + 0.5; aimY = by + 0.08; aimZ = bz + 0.5;
+        aimX = bx + 0.5; aimY = by + 0.09; aimZ = bz + 0.5; // нижняя грань
       } else {
-        // Бот на одном уровне → смотрим на ближайшую боковую грань
-        const dx = (botX < bx) ? bx + 0.08 : bx + 0.92;
-        const dz = (botZ < bz) ? bz + 0.08 : bz + 0.92;
-        // Выбираем ближайшую ось
+        const sdx = (botX < bx) ? bx + 0.09 : bx + 0.91;
+        const sdz = (botZ < bz) ? bz + 0.09 : bz + 0.91;
         if (Math.abs(botX - bx) < Math.abs(botZ - bz)) {
-          aimX = dx; aimY = by + 0.5; aimZ = bz + 0.5;
+          aimX = sdx; aimY = by + 0.5; aimZ = bz + 0.5;
         } else {
-          aimX = bx + 0.5; aimY = by + 0.5; aimZ = dz;
+          aimX = bx + 0.5; aimY = by + 0.5; aimZ = sdz;
         }
       }
 
       const Vec3 = require('vec3');
       await this.bot.lookAt(new Vec3(aimX, aimY, aimZ), true).catch(() => {});
-      await this._sleep(80 + Math.random() * 30);  // сервер обрабатывает Look packet
+      await this._sleep(75 + Math.random() * 30); // Look packet дошёл до сервера
 
-      // Перечитываем — мог упасть пока делали lookAt
+      // Перечитываем блок (мог упасть пока делали lookAt)
       const fresh = this.bot.blockAt(block.position);
       if (!fresh || fresh.type === 0) return false;
 
-      await this.bot.dig(fresh);
+      // FIX 2: проверяем видимость — не копаем через стены
+      if (typeof this.bot.canSeeBlock === 'function' && !this.bot.canSeeBlock(fresh)) {
+        return false;
+      }
+
+      // FIX 1: ручной dig-протокол с буфером 280мс (anarchia-стиль)
+      // bot.dig() отправляет FINISH_DESTROY_BLOCK слишком рано (~290мс до реального ломания).
+      // Решение: сами считаем время + буфер и шлём пакеты напрямую.
+      const face  = this._calcDigFace(fresh);
+      const digMs = this.bot.digTime(fresh);
+
+      if (digMs <= 50) {
+        // Мгновенная ломка (рука/инструмент с Efficiency или мягкий блок)
+        this.bot._client.write('block_dig', { status: 0, location: fresh.position, face });
+        this.bot.swingArm('right', true);
+        this.bot._client.write('block_dig', { status: 2, location: fresh.position, face });
+        await this._sleep(120);
+      } else {
+        // Нормальная ломка — START → ждём → FINISH
+        this.bot._client.write('block_dig', { status: 0, location: fresh.position, face });
+        // Машем рукой каждые 400мс во время ломки (анимация удара)
+        const swingMs = 400;
+        let elapsed = 0;
+        while (elapsed < digMs + 280) {
+          const step = Math.min(swingMs, digMs + 280 - elapsed);
+          await this._sleep(step);
+          elapsed += step;
+          if (elapsed < digMs + 280) this.bot.swingArm('right', true);
+        }
+        // Отправляем FINISH_DESTROY_BLOCK
+        this.bot._client.write('block_dig', { status: 2, location: fresh.position, face });
+        await this._sleep(130); // ждём blockUpdate от сервера
+      }
       return true;
     } catch (err) {
       return false;
