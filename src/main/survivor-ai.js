@@ -425,23 +425,10 @@ ${STAGE_GOALS[SURVIVOR_STAGES[this.currentStage]] || "Продолжай игр�
 
         const refreshed = bot.blockAt(block.position);
         if (refreshed && refreshed.name !== "air") {
-          // Плавный поворот к центру блока (3 шага — как у PVP-брайна)
-          try {
-            const bp  = block.position.offset(0.5, 0.5, 0.5);
-            const ep  = bot.entity.position.offset(0, 1.62, 0);
-            const dx  = bp.x - ep.x, dy = bp.y - ep.y, dz = bp.z - ep.z;
-            const tY  = Math.atan2(-dx, dz);
-            const tP  = Math.atan2(-dy, Math.sqrt(dx*dx + dz*dz));
-            const cY  = bot.entity.yaw, cP = bot.entity.pitch;
-            const noise = () => (Math.random() - 0.5) * 0.04;
-            for (let i = 1; i <= 3; i++) {
-              const t = i / 3;
-              await bot.look(cY + (tY - cY)*t + noise(), cP + (tP - cP)*t + noise(), false).catch(() => {});
-              if (i < 3) await this._sleep(18 + Math.floor(Math.random() * 14));
-            }
-            await this._sleep(60);
-          } catch {}
-          await bot.dig(refreshed).catch(() => {});
+          // bot.dig() сам делает lookAt перед ломкой.
+          // Голова не дёргается при навигации потому что мы используем GoalNear(2)
+          // вместо GoalBlock — pathfinder больше не пытается залезть в блок.
+          await bot.dig(refreshed, true).catch(() => {});
           this._failCounts = {}; // сброс счётчиков при успехе
           return true;
         }
