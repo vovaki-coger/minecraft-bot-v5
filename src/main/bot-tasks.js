@@ -1217,11 +1217,10 @@ class TaskManager {
       }
 
       const Vec3 = require('vec3');
-      // FIX: плавный поворот (как PVP brain) вместо мгновенного snap
       const aimY = block.position.y + 0.9;
       const aim  = new Vec3(block.position.x + 0.5, aimY, block.position.z + 0.5);
-      await this._smoothLookAt(aim);
-      await this._sleep(55 + Math.random() * 20);
+      await this.bot.lookAt(aim, true).catch(() => {});
+      await this._sleep(70 + Math.random() * 20);
 
       await this.bot.activateBlock(block).catch(() => {});
       this.bot.swingArm('right', true); // анимация правой руки
@@ -1288,9 +1287,10 @@ class TaskManager {
         }
       }
       const Vec3 = require('vec3');
-      // FIX: плавный поворот (как у PVP-брайна) вместо мгновенного snap — убирает дёрганье головы
-      await this._smoothLookAt(new Vec3(aimX, aimY, aimZ));
-      await this._sleep(60 + Math.random() * 20);
+      // lookAt(aim, true): синхронно обновляет entity.yaw/pitch ДО canSeeBlock-проверки.
+      // _smoothLookAt через bot.look() не даёт такой гарантии → canSeeBlock мог возвращать false.
+      await this.bot.lookAt(new Vec3(aimX, aimY, aimZ), true).catch(() => {});
+      await this._sleep(75 + Math.random() * 30);
 
       const fresh = this.bot.blockAt(block.position);
       if (!fresh || fresh.type === 0) return false;
