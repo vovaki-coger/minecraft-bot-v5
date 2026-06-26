@@ -137,10 +137,8 @@ class TaskManager {
       // Перечитываем блок — за время пути он мог быть сломан кем-то
       const freshBlock = this.bot.blockAt(block.position);
       if (!freshBlock || freshBlock.type === 0 || freshBlock.name !== block.name) continue;
-      await this._equipBestTool(freshBlock);
-      await this.bot.lookAt(freshBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
       const logsBefore = this._countInventory(/log/);
-      await this.bot.dig(freshBlock).catch(() => {});
+      await this._safeDigBlock(freshBlock);
       await this._sleep(200);
       if (this._countInventory(/log/) > logsBefore) {
         collected++;
@@ -164,10 +162,8 @@ class TaskManager {
       // Перечитываем блок — за время пути он мог быть сломан
       const freshBlk = this.bot.blockAt(block.position);
       if (!freshBlk || freshBlk.type === 0) continue;
-      await this._equipBestTool(freshBlk);
-      await this.bot.lookAt(freshBlk.position.offset(0.5,0.5,0.5),true).catch(()=>{});
       const countBefore = this._countInventory(new RegExp(blockName.replace("_", ".")));
-      await this.bot.dig(freshBlk).catch(() => {});
+      await this._safeDigBlock(freshBlk);
       await this._sleep(150);
       const countAfter = this._countInventory(new RegExp(blockName.replace("_", ".")));
       if (countAfter > countBefore) collected++;
@@ -403,7 +399,7 @@ class TaskManager {
               await this._gotoNearest(tp, 3);
               for (let h = height; h >= 2 && this._running; h--) {
                 const b = this.bot.blockAt(tp.offset(0, h, 0));
-                if (b && b.name === growthName) { await this.bot.lookAt(b.position.offset(0.5,0.5,0.5),true).catch(()=>{}); await this.bot.dig(b).catch(() => {}); await this._sleep(50); }
+                if (b && b.name === growthName) { await this._safeDigBlock(b); await this._sleep(50); }
               }
               harvested++;
             }
@@ -436,8 +432,7 @@ class TaskManager {
               const isMelon = fruitBlock?.name === "melon" || fruitBlock?.name === "pumpkin";
               if (isMelon) {
                 await this._gotoNearest(fruitPos, 3);
-                await this.bot.lookAt(fruitBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
-                await this.bot.dig(fruitBlock).catch(() => {});
+                await this._safeDigBlock(fruitBlock);
                 await this._sleep(60);
                 harvested++;
                 break;
@@ -467,8 +462,7 @@ class TaskManager {
           if (age >= maxAge) {
             await this._gotoNearest(tp, 3);
             if (!this._running) break;
-            await this.bot.lookAt(cropBlock.position.offset(0.5,0.5,0.5),true).catch(()=>{});
-            await this.bot.dig(cropBlock).catch(() => {});
+            await this._safeDigBlock(cropBlock);
             await this._sleep(60);
             const freshSeed = this.bot.inventory.items().find(i => i.name === crop);
             if (freshSeed) {
@@ -590,8 +584,7 @@ class TaskManager {
             const age = above.getProperties?.()?.age ?? above.metadata ?? 0;
             if (age >= maxAge) {
               // Ломаем
-              await this.bot.lookAt(above.position.offset(0.5,0.5,0.5),true).catch(()=>{});
-              await this.bot.dig(above).catch(() => {});
+              await this._safeDigBlock(above);
               await this._sleep(35 + Math.random() * 10);
               // Сразу сажаем снова
               const seed = this.bot.inventory.items().find(i => i.name === crop);
@@ -682,9 +675,7 @@ class TaskManager {
         if (!this._running) break;
         const freshLog = this.bot.blockAt(logBlock.position);
         if (!freshLog || freshLog.type === 0) continue;
-        await this._equipBestTool(freshLog);
-        await this.bot.lookAt(freshLog.position.offset(0.5,0.5,0.5),true).catch(()=>{});
-        await this.bot.dig(freshLog).catch(() => {});
+        await this._safeDigBlock(freshLog);
         await this._sleep(80);
         chopped++;
       }
@@ -1026,7 +1017,7 @@ class TaskManager {
           // Подходим к блоку
           try {
             await this.bot.pathfinder.goto(
-              new goals.GoalNear(x, y, z, 3)
+              new goals.GoalNear(x, y, z, 2)
             ).catch(() => {});
           } catch { continue; }
 
@@ -1038,9 +1029,7 @@ class TaskManager {
 
           await this._eatIfHungry();
           try {
-            await this._equipBestTool(b2);
-            await this.bot.lookAt(b2.position.offset(0.5,0.5,0.5),true).catch(()=>{});
-            await this.bot.dig(b2);
+            await this._safeDigBlock(b2);
             dug++;
             if (dug % 16 === 0) {
               const msg = `⛏ Раскопка: ${dug}/${total} блоков (слой Y=${y})`;
@@ -1101,7 +1090,19 @@ class TaskManager {
         break;
       }
 
-      const ore = this.bot.findBlock({ matching: oreIds, maxDistance: radius });
+      // FIX: ищем видимые/достижимые руды; предпочитаем те что на уровне или ниже
+      // useExtraInfo фильтрует блоки которые бот реально может достать
+      const ore = this.bot.findBlock({
+        matching: oreIds,
+        maxDistance: radius,
+        useExtraInfo: b => {
+          const d = b.position.distanceTo(this.bot.entity.position);
+          if (d <= 4.5) return true; // уже рядом
+          // Предпочитаем блоки которые примерно на уровне бота (не выше на 3+)
+          const dy = b.position.y - this.bot.entity.position.y;
+          return dy <= 2; // избегаем руды высоко над головой (антик при взгляде вверх)
+        }
+      });
       if (!ore) {
         emptySearches++;
         if (emptySearches >= 4) { this._log("⛏ Руды не найдены рядом"); break; }
@@ -1109,7 +1110,7 @@ class TaskManager {
         const p = this.bot.entity.position;
         const dx = (Math.random() - 0.5) * 40;
         const dz = (Math.random() - 0.5) * 40;
-        this.bot.lookAt(p.offset(dx, 0, dz), false).catch(() => {});
+        // FIX: убран lookAt во время движения pathfinder (перезаписывался)
         await this.bot.pathfinder.goto(
           new goals.GoalNear(p.x + dx, targetY, p.z + dz, 3)
         ).catch(() => {});
@@ -1123,9 +1124,7 @@ class TaskManager {
       const freshOre = this.bot.blockAt(ore.position);
       if (!freshOre || freshOre.type === 0) continue;
 
-      await this._equipBestTool(freshOre);
-      await this.bot.lookAt(freshOre.position.offset(0.5, 0.5, 0.5), true).catch(() => {});
-      await this.bot.dig(freshOre).catch(() => {});
+      await this._safeDigBlock(freshOre);
       mined++;
       if (mined % 5 === 0) this._log("⛏ Добыто руд: " + mined);
     }
@@ -1201,14 +1200,72 @@ class TaskManager {
       await this._gotoNearest(block.position, 2);
       if (!this._running) return;
     }
-    await this._equipBestTool(block);
-    await this.bot.lookAt(block.position.offset(0.5, 0.5, 0.5), true).catch(() => {});
-    await this.bot.dig(block).catch(() => {});
+    await this._safeDigBlock(block);
+  }
+
+
+  // ── Безопасное копание: стопаем pathfinder → смотрим на нужную ГРАНЬ → ждём → копаем ──
+  // Антик проверяет что бот смотрит точно на ломаемый блок.
+  // 1. Стопаем pathfinder — иначе он перезаписывает взгляд после lookAt.
+  // 2. Вычисляем точку на ВИДИМОЙ грани (не центр блока): верхняя грань если бот выше,
+  //    нижняя если ниже, боковая если рядом.
+  // 3. lookAt(force=true) + 80мс паузы — даём серверу обработать поворот.
+  // 4. Перечитываем блок (мог упасть пока делали lookAt).
+  // 5. dig().
+  async _safeDigBlock(block) {
+    if (!block || !this._running) return false;
+    try {
+      // Стопаем pathfinder — иначе он перезапишет взгляд после lookAt
+      try { this.bot.pathfinder.stop(); } catch {}
+      await this._sleep(60 + Math.random() * 20);
+
+      await this._equipBestTool(block);
+
+      // Вычисляем точку на видимой грани блока
+      const eyeY  = this.bot.entity.position.y + 1.62;
+      const botX  = this.bot.entity.position.x;
+      const botZ  = this.bot.entity.position.z;
+      const bx    = block.position.x;
+      const by    = block.position.y;
+      const bz    = block.position.z;
+
+      let aimX, aimY, aimZ;
+      if (eyeY > by + 1.02) {
+        // Бот выше блока → видна верхняя грань
+        aimX = bx + 0.5; aimY = by + 0.92; aimZ = bz + 0.5;
+      } else if (eyeY < by - 0.02) {
+        // Бот ниже блока → видна нижняя грань
+        aimX = bx + 0.5; aimY = by + 0.08; aimZ = bz + 0.5;
+      } else {
+        // Бот на одном уровне → смотрим на ближайшую боковую грань
+        const dx = (botX < bx) ? bx + 0.08 : bx + 0.92;
+        const dz = (botZ < bz) ? bz + 0.08 : bz + 0.92;
+        // Выбираем ближайшую ось
+        if (Math.abs(botX - bx) < Math.abs(botZ - bz)) {
+          aimX = dx; aimY = by + 0.5; aimZ = bz + 0.5;
+        } else {
+          aimX = bx + 0.5; aimY = by + 0.5; aimZ = dz;
+        }
+      }
+
+      const Vec3 = require('vec3');
+      await this.bot.lookAt(new Vec3(aimX, aimY, aimZ), true).catch(() => {});
+      await this._sleep(80 + Math.random() * 30);  // сервер обрабатывает Look packet
+
+      // Перечитываем — мог упасть пока делали lookAt
+      const fresh = this.bot.blockAt(block.position);
+      if (!fresh || fresh.type === 0) return false;
+
+      await this.bot.dig(fresh);
+      return true;
+    } catch (err) {
+      return false;
+    }
   }
 
   async _gotoNearest(pos, range = 3) {
-    // Смотрим в направлении цели пока идём
-    this.bot.lookAt(pos.offset(0.5, 0.5, 0.5), false).catch(() => {});
+    // FIX: убран lookAt во время движения — pathfinder сам управляет поворотом,
+    // конфликтующий lookAt(false) приводил к случайному взгляду после остановки
     await this.bot.pathfinder.goto(
       new goals.GoalNear(pos.x, pos.y, pos.z, range)
     ).catch(() => {});
