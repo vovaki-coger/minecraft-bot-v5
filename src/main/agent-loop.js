@@ -201,10 +201,17 @@ this._combatLoop = setInterval(() => {
     // AntiDetect: нокбек-пауза
     if (Date.now() < this._knockbackPauseUntil) return;
 
-    // Проактивная атака: ищем врагов в радиусе 8м ВСЕГДА
-    const proactiveTarget = this._findNearestHostileMob(8);
-    if (proactiveTarget && !this._combatTarget) {
-      this._setCombatTarget(proactiveTarget, proactiveTarget.mobType || proactiveTarget.name || "mob");
+    // FIX v5.36.0: не прерываем задачу TaskManager проактивным боем.
+    // Раньше: находим моба в 8м → bot.pathfinder.goto(GoalFollow) каждые 260мс →
+    // отменяет _gotoNearest задачи → бот никогда не доходит до цели (~1 блок/8сек).
+    // Теперь: проактивный поиск только когда TaskManager не занят.
+    const taskBusy = this.instance.taskManager?._running;
+
+    if (!taskBusy) {
+      const proactiveTarget = this._findNearestHostileMob(8);
+      if (proactiveTarget && !this._combatTarget) {
+        this._setCombatTarget(proactiveTarget, proactiveTarget.mobType || proactiveTarget.name || "mob");
+      }
     }
 
     if (!this._combatTarget) return;
@@ -230,8 +237,11 @@ this._combatLoop = setInterval(() => {
 
     try {
       if (dist > 3.2) {
-        // Спринт: allowSprinting=false (GrimAC Invalid Move fix, см. anti-detect.js)
+        // FIX v5.36.0: если бот занят задачей — не перехватываем pathfinder.
+        // Ждём пока моб сам подойдёт на дистанцию удара (<= 3.2).
+        if (taskBusy) return;
 
+        // Спринт: allowSprinting=false (GrimAC Invalid Move fix, см. anti-detect.js)
 
         // AntiDetect: не перезапускаем pathfinder если цель не ушла далеко
         const moved = !this._moveTargetPos ||
@@ -246,9 +256,11 @@ this._combatLoop = setInterval(() => {
             .catch(() => { this._movingToTarget = false; });
         }
       } else {
-        // В зоне удара
+        // В зоне удара — атакуем даже во время задачи (не ломаем её pathfinder)
         this._movingToTarget = false;
-        try { bot.pathfinder.stop(); } catch {}
+        if (!taskBusy) {
+          try { bot.pathfinder.stop(); } catch {}
+        }
 
         // AntiDetect: FOV-проверка — не атакуем за спиной (KillAura флаг)
         if (!this._antiDetect.isInFov(target, 130)) {
