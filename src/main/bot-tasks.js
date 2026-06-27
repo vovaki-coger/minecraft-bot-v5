@@ -1208,8 +1208,7 @@ class TaskManager {
   async _safeActivateBlock(block, handItem) {
     if (!block || !this._running) return;
     try {
-      try { this.bot.pathfinder.stop(); } catch {}
-      await this._sleep(55 + Math.random() * 20);
+      await this._sleep(50 + Math.random() * 20);
 
       if (handItem) {
         await this.bot.equip(handItem, 'hand').catch(() => {});
@@ -1219,7 +1218,10 @@ class TaskManager {
       const Vec3 = require('vec3');
       const aimY = block.position.y + 0.9;
       const aim  = new Vec3(block.position.x + 0.5, aimY, block.position.z + 0.5);
-      await this.bot.lookAt(aim, true).catch(() => {});
+      try {
+        const r = this.bot.lookAt(aim, true);
+        if (r && typeof r.then === 'function') await r.catch(() => {});
+      } catch {}
       await this._sleep(70 + Math.random() * 20);
 
       await this.bot.activateBlock(block).catch(() => {});
@@ -1259,9 +1261,10 @@ class TaskManager {
   async _safeDigBlock(block) {
     if (!block || !this._running) return false;
     try {
-      // Стопаем pathfinder чтобы не перезаписывал взгляд после lookAt
-      try { this.bot.pathfinder.stop(); } catch {}
-      await this._sleep(55 + Math.random() * 20);
+      // НЕ останавливаем pathfinder здесь — он уже завершил работу после _gotoNearest.
+      // pathfinder.stop() + затем провал lookAt → pathfinder никогда не перезапускался →
+      // бот вечно стоял на месте.
+      await this._sleep(50 + Math.random() * 20);
 
       await this._equipBestTool(block);
 
@@ -1287,10 +1290,16 @@ class TaskManager {
         }
       }
       const Vec3 = require('vec3');
-      // lookAt(aim, true): синхронно обновляет entity.yaw/pitch ДО canSeeBlock-проверки.
-      // _smoothLookAt через bot.look() не даёт такой гарантии → canSeeBlock мог возвращать false.
-      await this.bot.lookAt(new Vec3(aimX, aimY, aimZ), true).catch(() => {});
-      await this._sleep(75 + Math.random() * 30);
+      // Bulletproof lookAt — в mineflayer некоторых версий lookAt возвращает undefined
+      // (не Promise), тогда .catch() бросает TypeError и валит весь _safeDigBlock через
+      // внешний catch. Теперь поддерживаем оба варианта: Promise и callback/void.
+      try {
+        const lookResult = this.bot.lookAt(new Vec3(aimX, aimY, aimZ), true);
+        if (lookResult && typeof lookResult.then === 'function') {
+          await lookResult.catch(() => {});
+        }
+      } catch {}
+      await this._sleep(80);
 
       const fresh = this.bot.blockAt(block.position);
       if (!fresh || fresh.type === 0) return false;
