@@ -337,6 +337,8 @@ class BotManager {
             .filter(i => i.foodPoints && i.foodPoints > 0)
             .sort((a, b) => (b.foodPoints || 0) - (a.foodPoints || 0))[0];
           if (foodItem) {
+            // FIX v5.33.0: сохраняем цель, возобновим после экстренной еды
+            const _healthEatGoal = bot.pathfinder?.goal ?? null;
             try { bot.clearControlStates(); } catch {}
             try { bot.pathfinder.stop(); } catch {}
             setTimeout(() => {
@@ -344,7 +346,13 @@ class BotManager {
               bot.equip(foodItem, "hand")
                 .then(() => new Promise(r => setTimeout(r, 80 + Math.random() * 60)))
                 .then(() => bot.consume())
-                .catch(() => {});
+                .catch(() => {})
+                .finally(() => {
+                  // FIX v5.33.0: возобновляем pathfinder после экстренной еды
+                  if (_healthEatGoal) {
+                    try { bot.pathfinder.setGoal(_healthEatGoal, true); } catch {}
+                  }
+                });
             }, 180 + Math.floor(Math.random() * 150));
           }
         }
@@ -418,6 +426,8 @@ class BotManager {
           .sort((a, b) => (b.foodPoints || 0) - (a.foodPoints || 0))[0];
         if (foodItem) {
           _isEating = true;
+          // FIX v5.33.0: сохраняем текущую цель чтобы возобновить после еды
+          const _eatSavedGoal = bot.pathfinder?.goal ?? null;
           // Стоп всех движений — анти-чит флагует consume во время ходьбы
           try { bot.clearControlStates(); } catch {}
           try { bot.pathfinder.stop(); } catch {}
@@ -432,7 +442,13 @@ class BotManager {
                   .then(() => bot.consume());
               })
               .catch(() => {})
-              .finally(() => { _isEating = false; });
+              .finally(() => {
+                _isEating = false;
+                // FIX v5.33.0: возобновляем pathfinder после еды если была активная цель
+                if (_eatSavedGoal) {
+                  try { bot.pathfinder.setGoal(_eatSavedGoal, true); } catch {}
+                }
+              });
           }, eatDelay);
         }
       }
@@ -474,11 +490,17 @@ class BotManager {
       // Сообщаем лобби-хандлеру
       instance.lobbyHandler?.onChatMessage(text);
 
-      // Если сервер прислал HALTED / Invalid move — немедленно останавливаем движение
-      if (text.includes("HALTED") || text.includes("Invalid move") || text.includes("moved too quickly")) {
+      // FIX v5.33.0: "HALTED" убрано (совпадало с обычными сообщениями сервера).
+      // "moved too quickly" = явный флаг — полная остановка.
+      // "Invalid move player packet" = проблема скорости — только sprint выкл,
+      //   pathfinder продолжает (allowSprinting=false уже в Movements, пересчитает сам).
+      if (text.includes("moved too quickly")) {
         try { bot.clearControlStates(); } catch {}
         try { bot.pathfinder.stop(); } catch {}
-        log.warn("[BotManager] Anti-cheat triggered, movement stopped for bot", botId);
+        log.warn("[BotManager] 'moved too quickly' — движение остановлено (бот", botId, ")");
+      } else if (text.includes("Invalid move player packet")) {
+        try { bot.setControlState('sprint', false); } catch {}
+        log.warn("[BotManager] 'Invalid move' — sprint выключен, pathfinder продолжает (бот", botId, ")");
       }
     });
 
