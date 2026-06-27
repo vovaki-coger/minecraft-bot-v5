@@ -132,16 +132,7 @@ class TaskManager {
       }
       exploreAttempts = 0;
       await this._eatIfHungry();
-      // FIX walk: для брёвен выше головы (y > bot.y + 1.5) GoalNear(block.y) заставлял
-      // pathfinder пытаться забраться на y+1 — не мог → тихо падал → бот завис на месте.
-      // Решение: передаём navY = bot.y, чтобы навигация была горизонтальной.
-      // Копать ВВЕРХ _safeDigBlock умеет: aimY = by+0.09 (нижняя грань) + face=0.
-      {
-        const navY = block.position.y > this.bot.entity.position.y + 1.5
-          ? this.bot.entity.position.y   // бревно выше — идём на свой уровень
-          : block.position.y;            // бревно рядом — идём к нему
-        await this._gotoNearest({ x: block.position.x, y: navY, z: block.position.z }, 2);
-      }
+      await this._gotoNearest(block.position, 2);
       if (!this._running) break;
       // Перечитываем блок — за время пути он мог быть сломан кем-то
       const freshBlock = this.bot.blockAt(block.position);
@@ -1304,20 +1295,14 @@ class TaskManager {
       const fresh = this.bot.blockAt(block.position);
       if (!fresh || fresh.type === 0) return false;
 
-      // FIX-C: не копаем через стены.
-      // Исключение: блок ПРЯМО над головой — canSeeBlock() даёт false для нижней грани
-      // которая видна боту снизу, поэтому для таких блоков проверку пропускаем.
-      const _eyeY = this.bot.entity.position.y + 1.62;
-      const _blockAbove = fresh.position.y > _eyeY &&
-        Math.abs(this.bot.entity.position.x - fresh.position.x - 0.5) < 1.0 &&
-        Math.abs(this.bot.entity.position.z - fresh.position.z - 0.5) < 1.0;
-      // FIX dig-bug: canSeeBlock() давал false на реально доступных блоках →
-      // бот тихо пропускал блоки и ничего не копал.
-      // bot.lookAt(aim,true) уже развернул голову; копаем всегда, ошибка поймается ниже.
-      if (!_blockAbove && typeof this.bot.canSeeBlock === 'function' && !this.bot.canSeeBlock(fresh)) {
-        // НЕ прерываем (убрали return false) — продолжаем копать
-        // bot._client.write / dig сам вернёт ошибку если блок реально недостижим
-      }
+      // NOTE: canSeeBlock() УБРАН намеренно.
+      // Проблема: canSeeBlock делает raycast от глаза бота к центру блока.
+      // Для руды внутри камня, бревна с воздухом с одной стороны и т.д.
+      // raycast часто проходит через соседний блок → false → dig пропускается → бот
+      // стоит на месте (findBlock возвращает ту же руду снова, dist <= 2 → gotoNearest
+      // возвращает сразу → eternal loop без движения).
+      // Защита от копания через стены обеспечивается тем, что _gotoNearest ставит бота
+      // вплотную к блоку перед копанием — сервер сам отклонит аномальные dig-пакеты.
 
       // FIX-B защита: неломаемые блоки дают Infinity → бесконечный цикл → краш
       const rawDig = this.bot.digTime(fresh);
