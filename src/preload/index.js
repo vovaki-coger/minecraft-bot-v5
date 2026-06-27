@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       "bot:survivorStarted", "bot:survivorStopped", "bot:survivorLog",
       "bot:aiToggled", "bot:windowOpen", "bot:windowClose", "bot:modelDetected",
       "bot:anarchyStarted", "bot:anarchyStopped", "bot:anarchyPhase", "bot:anarchyLog",
+      "bot:anarchyBrainTraining", "bot:anarchyBrainReady",
       "bot:farmStarted", "bot:farmStopped", "bot:farmLog",
       "bot:excavateProgress", "bot:excavateDone",
       "bot:pvpStarted", "bot:pvpStopped", "bot:pvpToggled", "bot:pvpBrainTraining", "bot:pvpBrainReady",
