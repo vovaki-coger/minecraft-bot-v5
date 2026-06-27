@@ -149,7 +149,11 @@ class AgentLoop {
     // AntiDetect: нокбек-пауза — даём серверу применить откат
     this._knockbackPauseUntil = Date.now() + 480;
     this._movingToTarget = false;
-    try { this.bot.pathfinder.stop(); } catch {}
+    // FIX v5.36.2: не стопаем pathfinder если TaskManager выполняет задачу.
+    // Раньше: каждый удар моба → pathfinder.stop() → задача не могла идти.
+    if (!this.instance.taskManager?._running) {
+      try { this.bot.pathfinder.stop(); } catch {}
+    }
 
     // Fallback: если нет информации об атакующем — ищем ближайшего врага
     if (!this._combatTarget) {
