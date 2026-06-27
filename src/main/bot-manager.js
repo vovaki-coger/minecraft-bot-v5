@@ -298,7 +298,8 @@ class BotManager {
           // FIX: останавливаем pathfinder только если PvP НЕ активен.
           // Когда PvP-контроллер работает — он сам управляет pathfinder.
           // Принудительный stop() при каждом ударе сбивал движение к цели.
-          if (!instance._pvpController?.isRunning()) {
+          // FIX v5.36.2: не стопаем pathfinder если TaskManager занят задачей
+          if (!instance._pvpController?.isRunning() && !instance.taskManager?._running) {
             try { bot.pathfinder.stop(); } catch {}
           }
           // Если в воздухе — сбрасываем прыжок (безопасно при любом режиме)
