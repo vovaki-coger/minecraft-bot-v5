@@ -274,10 +274,13 @@ class BotManager {
       }, spawnIdleMs);
 
       const movements = new Movements(bot);
-      // Спринт включён — без него бот не прыгает через блоки и не обходит стены.
-      // Pathfinder сам останавливается точно у цели (GoalNear), overshoot не происходит.
-      movements.allowSprinting = true;
-      movements.allowParkour = true;
+      // Спринт ВЫКЛЮЧЕН — сервер отклоняет пакеты на sprint-скорости ("Invalid move")
+      // → бот rubber-band'ится обратно, стоит на месте, под ним частицы.
+      // При sprint=false pathfinder реально двигает бота (пешком, но без зависаний).
+      movements.allowSprinting = false;
+      // Parkour требует sprint → тоже выключаем чтобы pathfinder не пытался делать прыжки
+      // которые потребуют sprint и тоже будут отклонены.
+      movements.allowParkour = false;
       movements.allow1by1towers = true; // Нужно для рубки дерева (карабкаться вверх). PvP переопределит в false.
       movements.canDig = false; // Не ломаем блоки в пути — иначе частицы и зависание
       // Жидкость дорогая — бот не ходит по воде (анти-NoSlow флаг)
