@@ -325,6 +325,18 @@ class BotManager {
         log.warn(`[Bot ${botId}] kick_disconnect:`, packet.reason);
       });
 
+      // ── FIX v5.36.0: авто-принятие resource pack ─────────────────────
+      // Без этого серверы с принудительным ресурс-паком кикают бота сразу.
+      // result: 3 = accepted (начали скачивать), 0 = loaded (успешно загружен).
+      bot._client?.on('resource_pack_send', (packet) => {
+        const hash = packet.hash || '';
+        try { bot._client.write('resource_pack_receive', { hash, result: 3 }); } catch {}
+        setTimeout(() => {
+          try { bot._client.write('resource_pack_receive', { hash, result: 0 }); } catch {}
+        }, 1500 + Math.random() * 1000);
+        log.info(`[Bot ${botId}] resource_pack auto-accepted hash=${hash.slice(0,8)}...`);
+      });
+
       // ── Самооборона ──────────────────────────────────────────────────
       let prevHealth = bot.health || 20;
       bot.on('health', () => {
