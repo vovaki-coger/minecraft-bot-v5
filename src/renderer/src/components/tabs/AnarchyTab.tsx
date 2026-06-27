@@ -55,6 +55,9 @@ export default function AnarchyTab() {
   const [maxInv, setMaxInv] = useState(28);
   const [state, setState] = useState<AnarchyState | null>(null);
   const [log, setLog] = useState<{ msg: string; time: number }[]>([]);
+  const [brainTraining, setBrainTraining] = useState(false);
+  const [brainProgress, setBrainProgress] = useState(0);
+  const [brainMsg, setBrainMsg] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,6 +78,16 @@ export default function AnarchyTab() {
       window.electronAPI.on("bot:anarchyLog", (data: any) => {
         if (data.botId !== bot?.id) return;
         setLog(prev => [...prev.slice(-99), { msg: data.msg, time: data.time }]);
+      }),
+      window.electronAPI.on("bot:anarchyBrainTraining", (data: any) => {
+        if (data.botId !== bot?.id) return;
+        setBrainTraining(true);
+        setBrainProgress(data.pct ?? 0);
+        setBrainMsg(data.msg ?? "Обучаю мозг анархии...");
+      }),
+      window.electronAPI.on("bot:anarchyBrainReady", (data: any) => {
+        if (data.botId !== bot?.id) return;
+        setBrainTraining(false);
       }),
     ];
     return () => { unsubs.forEach(fn => fn && fn()); };
@@ -118,7 +131,30 @@ export default function AnarchyTab() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden" style={{ position: "relative" }}>
+      {/* Brain training overlay */}
+      {brainTraining && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 50,
+          background: "rgba(10,10,10,0.92)",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: 12,
+        }}>
+          <div style={{ color: "#e74c3c", fontSize: 13, fontFamily: "monospace", fontWeight: "bold" }}>
+            🧠 Обучаю мозг Анархии...
+          </div>
+          <div style={{ width: 220, height: 6, background: "#1a1a1a", borderRadius: 4, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${brainProgress}%`, background: "#e74c3c",
+              borderRadius: 4, transition: "width 0.3s ease" }} />
+          </div>
+          <div style={{ color: "#888", fontSize: 10, fontFamily: "monospace", maxWidth: 240, textAlign: "center" }}>
+            {brainMsg || "Подождите..."}
+          </div>
+          <div style={{ color: "#444", fontSize: 9, fontFamily: "monospace" }}>
+            Только при первом запуске (~30-60с)
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="px-3 py-2 border-b flex items-center justify-between flex-shrink-0"
         style={{ borderColor: "#1a3a3a", background: "#141f1f" }}>
