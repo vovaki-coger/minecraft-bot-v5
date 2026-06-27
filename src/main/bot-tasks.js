@@ -134,6 +134,8 @@ class TaskManager {
       await this._eatIfHungry();
       await this._gotoNearest(block.position, 2);
       if (!this._running) break;
+      // Если pathfinder не смог дойти (стена, пропасть) — пропускаем блок
+      if ((this.bot.entity?.position?.distanceTo(block.position) ?? 99) > 5) continue;
       // Перечитываем блок — за время пути он мог быть сломан кем-то
       const freshBlock = this.bot.blockAt(block.position);
       if (!freshBlock || freshBlock.type === 0 || freshBlock.name !== block.name) continue;
@@ -159,6 +161,7 @@ class TaskManager {
       await this._eatIfHungry();
       await this._gotoNearest(block.position, 2);
       if (!this._running) break;
+      if ((this.bot.entity?.position?.distanceTo(block.position) ?? 99) > 5) continue;
       // Перечитываем блок — за время пути он мог быть сломан
       const freshBlk = this.bot.blockAt(block.position);
       if (!freshBlk || freshBlk.type === 0) continue;
@@ -1106,6 +1109,7 @@ class TaskManager {
 
       await this._gotoNearest(ore.position, 3);
       if (!this._running) break;
+      if ((this.bot.entity?.position?.distanceTo(ore.position) ?? 99) > 5) continue;
 
       const freshOre = this.bot.blockAt(ore.position);
       if (!freshOre || freshOre.type === 0) continue;
@@ -1416,10 +1420,10 @@ class TaskManager {
   }
 
   async _gotoNearest(pos, range = 3) {
-    // Pathfinder сам управляет setControlState — не вмешиваемся.
-    // Добавление forward=true конфликтует с pathfinder и ломает навигацию.
-    const dist = this.bot.entity?.position?.distanceTo(pos) ?? 99;
-    if (dist <= range) return; // уже на месте
+    // GoalNear сам обрабатывает "уже на месте" — нет смысла пропускать goto.
+    // Старая проверка dist <= range вызывала вечный стоп: pathfinder.stop() в
+    // _safeDigBlock останавливал pathfinder, dist<=range → goto пропускался →
+    // бот замерзал навсегда.
     await this.bot.pathfinder.goto(
       new goals.GoalNear(pos.x, pos.y, pos.z, range)
     ).catch(() => {});
