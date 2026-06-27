@@ -1323,7 +1323,8 @@ class TaskManager {
       // FIX-B защита: неломаемые блоки дают Infinity → бесконечный цикл → краш
       const rawDig = this.bot.digTime(fresh);
       if (!isFinite(rawDig) || rawDig < 0) return false; // bedrock и т.п.
-      const digMs = Math.min(rawDig, 8000); // cap 8 сек — не должно быть дольше
+      // FIX v5.36.0: +35% буфер для TPS-лага сервера (на 15 TPS реальное время в 1.35× длиннее)
+      const digMs = Math.min(rawDig * 1.35, 8000); // cap 8 сек — не должно быть дольше
       const face   = this._calcDigFace(fresh);
 
       // FIX-B защита: null-safe write (краш при дисконнекте)
