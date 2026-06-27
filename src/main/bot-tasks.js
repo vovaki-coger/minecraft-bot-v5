@@ -911,17 +911,20 @@ class TaskManager {
       return;
     }
 
-    // Спринт в сторону
-    this.bot.setControlState("sprint", true);
+    // FIX v5.32.0: убран ручной sprint=true — сервер отклонял движение ("Invalid move")
+    // и бот стоял на месте с частицами спринта (rubber-band).
+    // allowSprinting=false в bot-manager.js уже выключает спринт для pathfinder.
+    // Ходьба пешком (без sprint) проходит сервер без ошибок.
+    try { this.bot.setControlState("sprint", false); } catch {} // гарантируем: sprint OFF
     const dx = this.bot.entity.position.x - fromEntity.position.x;
     const dz = this.bot.entity.position.z - fromEntity.position.z;
     const len = Math.sqrt(dx*dx + dz*dz) || 1;
     const tx = this.bot.entity.position.x + (dx/len) * 15;
     const tz = this.bot.entity.position.z + (dz/len) * 15;
+    // pathfinder идёт пешком (allowSprinting=false) — камера сама поворачивается в сторону цели
     await this.bot.pathfinder.goto(
       new goals.GoalNear(tx, this.bot.entity.position.y, tz, 2)
     ).catch(() => {});
-    this.bot.setControlState("sprint", false);
   }
 
   _inFov(entity, fovDegrees = 100) {
