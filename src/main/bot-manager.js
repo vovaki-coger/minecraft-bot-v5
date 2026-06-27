@@ -274,17 +274,17 @@ class BotManager {
       }, spawnIdleMs);
 
       const movements = new Movements(bot);
-      // Выключаем спринт — anti-detect.js: allowSprinting=false главный фикс Invalid move
-      // Бот с sprint=true овершутит блок → lookAt назад → ломает воздух
-      movements.allowSprinting = false;
+      // Спринт включён — без него бот не прыгает через блоки и не обходит стены.
+      // Pathfinder сам останавливается точно у цели (GoalNear), overshoot не происходит.
+      movements.allowSprinting = true;
       movements.allowParkour = true;
       movements.allow1by1towers = true; // Нужно для рубки дерева (карабкаться вверх). PvP переопределит в false.
       movements.canDig = false; // Не ломаем блоки в пути — иначе частицы и зависание
       // Жидкость дорогая — бот не ходит по воде (анти-NoSlow флаг)
       try { movements.liquidCost = 100; } catch {}
       try { movements.waterCost = 100; } catch {}
-      // Не прыгаем с больших высот — предотвращаем flight/elytra флаги
-      try { movements.maxDropDown = 3; } catch {}
+      // Позволяем падать до 4 блоков (по умолчанию 4, было 3 — мешало нормальной навигации)
+      try { movements.maxDropDown = 4; } catch {}
       bot.pathfinder.setMovements(movements);
 
       // ── Knockback: health-событие = только HP нашего бота (entityHurt — для ДРУГИХ существ) ──
