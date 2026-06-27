@@ -31,7 +31,8 @@ const rnd  = (a,b) => a + Math.random()*(b-a);
 const pick = arr  => arr[Math.floor(Math.random()*arr.length)];
 
 // ─── Генератор 500 000 сценариев ─────────────────────────────────────────
-function buildSeedData() {
+async function buildSeedData() {
+  const _yield = () => new Promise(r => setImmediate(r));
   const data = [];
   function lbl(inp, walk, harvest, plant, till, bonemeal, eat, idle) {
     data.push({
@@ -53,6 +54,7 @@ function buildSeedData() {
       clamp(0.87+dist*0.10,0.82,0.98), 0,0,0,0,0,0.04);
   }
 
+  await _yield(); // yield ~60K
   // 1b. Далеко — пустой фармланд, идём сеять (50k)
   for (let i=0;i<50000;i++) {
     const dist=rnd(0.20,0.90), seeds=1, hoe=pick([0,1]);
@@ -69,6 +71,7 @@ function buildSeedData() {
       clamp(0.80+dist*0.15,0.72,0.97), 0,0,0,0,0,0.06);
   }
 
+  await _yield(); // yield ~150K
   // 1d. Ищем, инвентарь полон → идём к сундуку (30k)
   for (let i=0;i<30000;i++) {
     const inv=rnd(0.8,1.0), dist=rnd(0.10,0.80);
@@ -91,6 +94,7 @@ function buildSeedData() {
       clamp(0.62+dist*0.32,0.45,0.93), 0,0,0,0,0,0.10);
   }
 
+  await _yield(); // yield ~250K (walking done)
   // ════════════════════════════════════════════════════════════════════
   // КАТЕГОРИЯ 2: ФЕРМА — СБОР, ПОСЕВ, ВСПАШКА, КОСТНАЯ МУКА — 250 000
   // ════════════════════════════════════════════════════════════════════
@@ -104,6 +108,7 @@ function buildSeedData() {
       0, clamp(0.88+stage*0.10,0.80,0.98), 0,0,0,0,0.04);
   }
 
+  await _yield(); // yield ~320K
   // 2b. Посев семян на пустом фармланде (70k)
   for (let i=0;i<70000;i++) {
     const dist=rnd(0,0.10), seeds=1, stage=rnd(0,0.05);
@@ -112,6 +117,7 @@ function buildSeedData() {
       0,0, clamp(0.88+(1-dist)*0.10,0.82,0.98), 0,0,0,0.04);
   }
 
+  await _yield(); // yield ~390K
   // 2c. Вспашка земли (dist близко, есть мотыга, нет фармланда) (30k)
   for (let i=0;i<30000;i++) {
     const dist=rnd(0,0.12), hoe=1, farmland=rnd(0,0.25);
@@ -180,11 +186,12 @@ class FarmWheatBrain {
     try {
       prog(3, '📚 Генерируем сценарии (ходьба+ферма пшеницы)...');
       await yieldLoop();
-      const all = buildSeedData();
+      const all = await buildSeedData(); // FIX v5.36.0: async, yields every ~50K items
       prog(18, `✂️ Выбираем 10 000 из ${all.length.toLocaleString()}...`);
       for (let i=all.length-1;i>0;i--) {
         const j=Math.floor(Math.random()*(i+1));
         [all[i],all[j]]=[all[j],all[i]];
+        if (i % 50000 === 0) await yieldLoop(); // FIX v5.36.0: yield during shuffle
       }
       const data = all.slice(0, Math.min(10000, all.length));
       prog(22, `🌾 Обучаем нейросеть фермы пшеницы (${data.length.toLocaleString()} сцен.)...`);
