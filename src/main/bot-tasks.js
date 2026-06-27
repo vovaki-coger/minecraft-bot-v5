@@ -1112,7 +1112,10 @@ class TaskManager {
 
       await this._gotoNearest(ore.position, 3);
       if (!this._running) break;
-      if ((this.bot.entity?.position?.distanceTo(ore.position) ?? 99) > 5) continue;
+      // FIX v5.36.2: XZ-only distance check (высота не учитывается)
+      { const _ep = this.bot.entity?.position, _op = ore.position;
+        const _xz = _ep ? Math.hypot(_ep.x-_op.x, _ep.z-_op.z) : 99;
+        if (_xz > 5) continue; }
 
       const freshOre = this.bot.blockAt(ore.position);
       if (!freshOre || freshOre.type === 0) continue;
@@ -1424,13 +1427,15 @@ class TaskManager {
   }
 
   async _gotoNearest(pos, range = 3) {
-    // GoalNear сам обрабатывает "уже на месте" — нет смысла пропускать goto.
-    // Старая проверка dist <= range вызывала вечный стоп: pathfinder.stop() в
-    // _safeDigBlock останавливал pathfinder, dist<=range → goto пропускался →
-    // бот замерзал навсегда.
-    await this.bot.pathfinder.goto(
-      new goals.GoalNear(pos.x, pos.y, pos.z, range)
-    ).catch(() => {});
+    // FIX v5.36.2: XZ-only goal — высота (Y) не учитывается при подходе к блоку.
+    // Бот подходит на range блоков по горизонтали и может копать вверх/вниз.
+    const bx = Math.floor(pos.x), bz = Math.floor(pos.z);
+    const rr = range * range;
+    const xzGoal = {
+      isEnd(node)    { const dx=node.x-bx, dz=node.z-bz; return dx*dx+dz*dz <= rr; },
+      heuristic(node){ const dx=node.x-bx, dz=node.z-bz; return Math.max(0, Math.sqrt(dx*dx+dz*dz)-range); }
+    };
+    await this.bot.pathfinder.goto(xzGoal).catch(() => {});
   }
 
   _reportInventory() {
